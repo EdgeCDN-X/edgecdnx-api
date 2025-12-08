@@ -8,6 +8,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -17,6 +18,9 @@ func main() {
 	// Define flags
 	production := flag.Bool("production", false, "run in production mode")
 	listen := flag.String("listen", ":5555", "Address and port to listen at")
+	projectLabelNamespaceSelector := flag.String("project-label-namespace-selector", "edgecdnx.com/project=true", "Only namespaces with the given label will be considered for projects")
+	projectNameLabel := flag.String("project-name-label", "edgecdnx.com/project-name", "Label to use for project names in namespaces")
+
 	flag.Parse()
 
 	logger.Init(*production)
@@ -49,6 +53,14 @@ func main() {
 				return services.New(services.Config{})
 			},
 		},
+		{
+			func() (app.Module, error) {
+				return projects.New(projects.Config{
+					ProjectLabelNamespaceSelector: *projectLabelNamespaceSelector,
+					ProjectNameLabel:              *projectNameLabel,
+				})
+			},
+		},
 	}
 
 	for _, md := range authenticatedModules {
@@ -56,7 +68,8 @@ func main() {
 		if err != nil {
 			panic("module init failed")
 		}
-		a.RegisterModule(mod, authModule.Auth.AuthRequired())
+		// a.RegisterModule(mod, authModule.Auth.AuthRequired())
+		a.RegisterModule(mod)
 	}
 
 	a.Run(*listen)

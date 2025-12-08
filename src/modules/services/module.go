@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
@@ -119,11 +120,16 @@ func (m *Module) Init() error {
 	})
 
 	// Start informer
-	stopCh := make(chan struct{})
-	m.infommerChan = stopCh
-	go informer.Run(stopCh)
+	stop := make(chan struct{})
+	m.infommerChan = stop
+	go informer.Run(stop)
 
 	logger.L().Info("Watching Services")
+
+	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
+		logger.L().Error("Failed to sync informer cache")
+		return fmt.Errorf("failed to sync informer cache")
+	}
 
 	return nil
 }

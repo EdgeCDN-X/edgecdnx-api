@@ -55,6 +55,14 @@ func (a *App) Run(addr string) error {
 		Handler: a.Engine.Handler(),
 	}
 
+	logger.L().Info("Starting server", zap.String("address", addr))
+	go func() {
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.L().Error("ListenAndServe error", zap.Error(err))
+		}
+	}()
+
 	quit := make(chan os.Signal, 1)
 
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

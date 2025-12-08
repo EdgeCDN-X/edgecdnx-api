@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    edgecdnx.com/project: "true"
+    edgecdnx.com/project-name: "kokotina"
+  name: edgecdnx-project-dev
