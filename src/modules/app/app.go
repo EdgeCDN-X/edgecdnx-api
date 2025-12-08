@@ -2,14 +2,15 @@ package app
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type Module interface {
@@ -23,9 +24,14 @@ type App struct {
 	Modules []Module
 }
 
-func New() *App {
+func New(production bool) *App {
+	if production {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	g := gin.Default()
+
 	return &App{
-		Engine:  gin.Default(),
+		Engine:  g,
 		Modules: []Module{},
 	}
 }
@@ -54,14 +60,14 @@ func (a *App) Run(addr string) error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutdown Server ...")
+	logger.L().Info("Shutting down server ...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Println("Server Shutdown:", err)
+		logger.L().Error("Server Shutdown Error", zap.Error(err))
 	}
-	log.Println("Server exiting")
+	logger.L().Info("Server exiting")
 
 	for _, m := range a.Modules {
 		m.Shutdown()

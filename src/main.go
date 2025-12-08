@@ -1,9 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
+	"flag"
+
+	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
@@ -12,12 +14,18 @@ import (
 )
 
 func main() {
-	a := app.New()
+	// Define flags
+	production := flag.Bool("production", false, "run in production mode")
+	listen := flag.String("listen", ":5555", "Address and port to listen at")
+	flag.Parse()
+
+	logger.Init(*production)
+	a := app.New(*production)
 
 	// Cookie store and Session middleware initialization
 	cookie_secret, set := os.LookupEnv("EDGECDNX_API_COOKIE_SECRET")
 	if !set || cookie_secret == "" {
-		fmt.Println("EDGECDNX_API_COOKIE_SECRET environment variable not set, cannot start.")
+		logger.L().Fatal("EDGECDNX_API_COOKIE_SECRET environment variable not set")
 		os.Exit(1)
 	}
 
@@ -28,7 +36,7 @@ func main() {
 	// Register Auth module. This exposes our Auth middleware
 	authModule, err := auth.New(auth.Config{})
 	if err != nil {
-		panic("auth module init failed")
+		panic("auth module initialization failed")
 	}
 	a.RegisterModule(authModule)
 
@@ -51,5 +59,5 @@ func main() {
 		a.RegisterModule(mod, authModule.Auth.AuthRequired())
 	}
 
-	a.Run(":5555")
+	a.Run(*listen)
 }

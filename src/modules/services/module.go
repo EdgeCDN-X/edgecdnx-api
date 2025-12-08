@@ -2,18 +2,24 @@ package services
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"time"
 
+	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
+	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
 )
+
+var gvr = schema.GroupVersionResource{
+	Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
+	Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
+	Resource: "services",
+}
 
 type Config struct{}
 
@@ -28,17 +34,14 @@ func New(cfg Config) (*Module, error) {
 }
 
 func (m *Module) Shutdown() {
-	log.Default().Println("edgecdnxservices: Shutting down informer")
+
+	logger.L().Info("Shutting down informer")
 	close(m.infommerChan)
 }
 
 func (m *Module) Init() error {
-
-	fmt.Printf("edgecdnxservices: Initializing module\n")
-
+	logger.L().Info("Initializing module")
 	client, err := app.GetK8SDynamicClient()
-
-	fmt.Printf("edgecdnxservices: Got dynamic client: %v, err: %v\n", client, err)
 
 	if err != nil {
 		return err
@@ -46,76 +49,72 @@ func (m *Module) Init() error {
 
 	m.client = client
 
-	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(m.client, 5*time.Second, "argocd", nil)
-	informer := fac.ForResource(schema.GroupVersionResource{
-		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
-		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
-		Resource: "services",
-	}).Informer()
+	fac := dynamicinformer.NewDynamicSharedInformerFactory(m.client, 60*time.Minute)
+	informer := fac.ForResource(gvr).Informer()
 
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			s_raw, ok := obj.(*unstructured.Unstructured)
 			if !ok {
-				fmt.Printf("edgecdnxservices: expected Service object, got %T", obj)
+				logger.L().Error("Adding service: expected Service object, got different type")
 				return
 			}
 
 			temp, err := json.Marshal(s_raw.Object)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to marshal Service object: %v", err)
+				logger.L().Error("Failed to marshal Service object", zap.Error(err))
 				return
 			}
 			service := &infrastructurev1alpha1.Service{}
 			err = json.Unmarshal(temp, service)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to unmarshal Service object: %v", err)
+				logger.L().Error("Failed to unmarshal Service object", zap.Error(err))
 				return
 			}
 
-			fmt.Printf("edgecdnxservices: Added Service %s", service.Name)
+			logger.L().Info("Added Service", zap.String("name", service.Name))
 		},
 		UpdateFunc: func(oldObj, newObj any) {
 			s_new_raw, ok := newObj.(*unstructured.Unstructured)
 			if !ok {
-				fmt.Printf("edgecdnxservices: expected Service object, got %T", s_new_raw)
+				logger.L().Error("Updating service: expected Service object, got different type")
 				return
 			}
 
 			temp, err := json.Marshal(s_new_raw.Object)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to marshal Service object: %v", err)
+				logger.L().Error("Failed to marshal Service object", zap.Error(err))
 				return
 			}
 			newService := &infrastructurev1alpha1.Service{}
 			err = json.Unmarshal(temp, newService)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to unmarshal Service object: %v", err)
+				logger.L().Error("Failed to unmarshal Service object", zap.Error(err))
 				return
 			}
 
-			fmt.Printf("edgecdnxservices: Updated Service %s", newService.Name)
+			logger.L().Info("Updated Service", zap.String("name", newService.Name))
 		},
 		DeleteFunc: func(obj any) {
 			s_raw, ok := obj.(*unstructured.Unstructured)
 			if !ok {
-				fmt.Printf("edgecdnxservices: expected Service object, got %T", obj)
+				logger.L().Error("Deleting service: expected Service object, got different type")
 				return
 			}
 
 			temp, err := json.Marshal(s_raw.Object)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to marshal Service object: %v", err)
+				logger.L().Error("Failed to marshal Service object", zap.Error(err))
 				return
 			}
 			service := &infrastructurev1alpha1.Service{}
 			err = json.Unmarshal(temp, service)
 			if err != nil {
-				fmt.Printf("edgecdnxservices: failed to unmarshal Service object: %v", err)
+				logger.L().Error("Failed to unmarshal Service object", zap.Error(err))
 				return
 			}
 
-			fmt.Printf("edgecdnxservices: Deleted Service %s", service.Name)
+			logger.L().Info("Deleted Service", zap.String("name", service.Name))
 		},
 	})
 
@@ -124,7 +123,7 @@ func (m *Module) Init() error {
 	m.infommerChan = stopCh
 	go informer.Run(stopCh)
 
-	fmt.Printf("edgecdnxservices: Watching Services in namespace %s", "argocd")
+	logger.L().Info("Watching Services")
 
 	return nil
 }
