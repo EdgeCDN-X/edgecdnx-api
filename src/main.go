@@ -68,8 +68,7 @@ func main() {
 		if err != nil {
 			panic("module init failed")
 		}
-		// a.RegisterModule(mod, authModule.Auth.AuthRequired())
-		a.RegisterModule(mod)
+		a.RegisterModule(mod, authModule.AuthMiddleware())
 	}
 
 	a.Run(*listen)
