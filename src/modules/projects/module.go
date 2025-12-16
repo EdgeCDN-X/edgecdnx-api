@@ -6,24 +6,24 @@ import (
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
-	"go.uber.org/zap"
-	"k8s.io/client-go/informers"
+	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
-
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 type Config struct {
-	ProjectLabelNamespaceSelector string
-	ProjectNameLabel              string
+	NamespacedProjects bool
+	Namespace          string
 }
 
 type Module struct {
 	Informer     cache.SharedIndexInformer
 	cfg          Config
-	client       *kubernetes.Clientset
+	client       *dynamic.DynamicClient
 	informerChan chan struct{}
 }
 
@@ -39,7 +39,7 @@ func (m *Module) Shutdown() {
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
 
-	client, err := app.GetK8SClient()
+	client, err := app.GetK8SDynamicClient()
 
 	if err != nil {
 		return err
@@ -47,53 +47,35 @@ func (m *Module) Init() error {
 
 	m.client = client
 
-	fac := informers.NewFilteredSharedInformerFactory(client, 60*time.Minute, "", func(opts *metav1.ListOptions) {
-		opts.LabelSelector = m.cfg.ProjectLabelNamespaceSelector
-	})
-	informer := fac.Core().V1().Namespaces().Informer()
+	ns := ""
+	if !m.cfg.NamespacedProjects {
+		ns = m.cfg.Namespace
+	}
 
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			ns, ok := obj.(*v1.Namespace)
-			if !ok {
-				logger.L().Error("Adding namespace: expected Namespace object, got different type")
-				return
-			}
-
-			logger.L().Info("Added namespace", zap.String("name", ns.Name))
-		},
-		UpdateFunc: func(oldObj, newObj any) {
-			oldNs, ok := oldObj.(*v1.Namespace)
-			newNs, ok2 := newObj.(*v1.Namespace)
-			if !ok || !ok2 {
-				logger.L().Error("Updating namespace: expected Namespace object, got different type")
-				return
-			}
-
-			logger.L().Info("Updated namespace", zap.String("name", newNs.Name), zap.String("oldName", oldNs.Name))
-		},
-		DeleteFunc: func(obj any) {
-			ns, ok := obj.(*v1.Namespace)
-			if !ok {
-				logger.L().Error("Deleting namespace: expected Namespace object, got different type")
-				return
-			}
-
-			logger.L().Info("Deleted namespace", zap.String("name", ns.Name))
-		},
-	})
+	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, ns, nil)
+	informer := fac.ForResource(schema.GroupVersionResource{
+		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
+		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
+		Resource: "projects",
+	}).Informer()
 
 	informer.GetIndexer().AddIndexers(cache.Indexers{
 		"projectName": func(obj any) ([]string, error) {
-			ns, ok := obj.(*v1.Namespace)
+
+			fmt.Printf("Indexing project object: %+v\n", obj)
+
+			raw, ok := obj.(*unstructured.Unstructured)
 			if !ok {
-				return nil, fmt.Errorf("expected Namespace object, got %T", obj)
+				return nil, fmt.Errorf("Object conversion failed")
 			}
 
-			if name, exists := ns.Labels[m.cfg.ProjectNameLabel]; exists {
-				return []string{name}, nil
+			project := &infrastructurev1alpha1.Project{}
+			err := runtime.DefaultUnstructuredConverter.FromUnstructured(raw.Object, project)
+			if err != nil {
+				return nil, err
 			}
-			return []string{}, nil
+
+			return []string{project.Spec.Name}, nil
 		},
 	})
 
@@ -102,8 +84,6 @@ func (m *Module) Init() error {
 	m.informerChan = stop
 
 	go informer.Run(stop)
-
-	logger.L().Info("Watching namespaces with label selector", zap.String("selector", m.cfg.ProjectLabelNamespaceSelector))
 
 	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
 		logger.L().Error("Failed to sync informer cache")

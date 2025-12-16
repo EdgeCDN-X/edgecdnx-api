@@ -1,5 +1,5 @@
-github.com/EdgeCDN-X/edgecdnx-controller v0.13.0 h1:Xr9RbKjXSbCUvoATOjdWMP3wREka5bEMmT/UPBg/jWc=
-github.com/EdgeCDN-X/edgecdnx-controller v0.13.0/go.mod h1:/1MHGPD6YknBhlvxXCw/9DbGxa0sbePpPk4yWn3sWAI=
+github.com/EdgeCDN-X/edgecdnx-controller v0.14.1 h1:IoifbANh0HqQpQkNcNkE32GlTvhLFlz21B8yNCzCn90=
+github.com/EdgeCDN-X/edgecdnx-controller v0.14.1/go.mod h1:/1MHGPD6YknBhlvxXCw/9DbGxa0sbePpPk4yWn3sWAI=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/boj/redistore v0.0.0-20180917114910-cd5dcc76aeff/go.mod h1:+RTT1BOk5P97fT2CiHkbFQwkK3mjsFAP6zCYV2aXtjw=

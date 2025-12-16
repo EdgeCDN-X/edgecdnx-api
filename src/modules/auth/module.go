@@ -6,19 +6,33 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
+	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/tools/cache"
 )
 
 type Config struct {
 	oidc.Config
 	verifier       *oidc.IDTokenVerifier
 	authMiddleware gin.HandlerFunc
+
+	NamespacedProjects bool
+	Namespace          string
 }
 
 type Module struct {
-	cfg Config
+	cfg          Config
+	client       *dynamic.DynamicClient
+	informerChan chan struct{}
+	Informer     cache.SharedIndexInformer
 }
 
 func (m *Module) AuthMiddleware() gin.HandlerFunc {
@@ -59,10 +73,14 @@ func New(cfg Config) (*Module, error) {
 }
 
 func (m *Module) Shutdown() {
-	// No-op
+	logger.L().Info("Shutting down informer")
+	close(m.informerChan)
 }
 
 func (m *Module) Init() error {
+
+	logger.L().Info("Initializing Auth module")
+
 	provider, err := oidc.NewProvider(context.Background(), os.Getenv("OIDC_ISSUER_URL"))
 	if err != nil {
 		return fmt.Errorf("failed to get provider: %w", err)
@@ -74,6 +92,38 @@ func (m *Module) Init() error {
 	}
 	m.cfg.Config = *oidcConfig
 	m.cfg.verifier = provider.Verifier(oidcConfig)
+
+	client, err := app.GetK8SDynamicClient()
+
+	if err != nil {
+		return err
+	}
+
+	m.client = client
+
+	ns := ""
+	if !m.cfg.NamespacedProjects {
+		ns = m.cfg.Namespace
+	}
+
+	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, ns, nil)
+	informer := fac.ForResource(schema.GroupVersionResource{
+		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
+		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
+		Resource: "projects",
+	}).Informer()
+
+	logger.L().Info("Initializing Auth module 2")
+
+	stop := make(chan struct{})
+	m.Informer = informer
+	m.informerChan = stop
+	go informer.Run(stop)
+
+	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
+		logger.L().Error("Failed to sync informer cache")
+		return fmt.Errorf("failed to sync informer cache")
+	}
 
 	return nil
 }

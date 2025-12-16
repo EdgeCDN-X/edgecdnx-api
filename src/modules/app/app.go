@@ -36,10 +36,14 @@ func New(production bool) *App {
 	}
 }
 
-func (a *App) RegisterModule(m Module, middlewares ...gin.HandlerFunc) {
+func (a *App) RegisterModule(m Module, middlewares ...gin.HandlerFunc) error {
 	a.Modules = append(a.Modules, m)
-	m.Init()
+	err := m.Init()
+	if err != nil {
+		return err
+	}
 	m.RegisterRoutes(a.Engine, middlewares...)
+	return nil
 }
 
 func (a *App) Shutdown() {

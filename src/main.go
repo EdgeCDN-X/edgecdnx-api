@@ -12,14 +12,17 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
+	"go.uber.org/zap"
 )
 
 func main() {
 	// Define flags
 	production := flag.Bool("production", false, "run in production mode")
 	listen := flag.String("listen", ":5555", "Address and port to listen at")
-	projectLabelNamespaceSelector := flag.String("project-label-namespace-selector", "edgecdnx.com/project=true", "Only namespaces with the given label will be considered for projects")
-	projectNameLabel := flag.String("project-name-label", "edgecdnx.com/project-name", "Label to use for project names in namespaces")
+	namespacedProjects := flag.Bool("namespaced-projects", false, "If set, projects will be namespaced")
+
+	// If namespaced-projects is set, the module will expect each project to be in its own namespace. Otherwise, watch for the selected namespace only
+	namespace := flag.String("namespace", "edgecdnx", "Kubernetes namespace to watch for resources")
 
 	flag.Parse()
 
@@ -38,11 +41,19 @@ func main() {
 	a.Engine.Use(sessions.Sessions("dex", store))
 
 	// Register Auth module. This exposes our Auth middleware
-	authModule, err := auth.New(auth.Config{})
+	authModule, err := auth.New(auth.Config{
+		NamespacedProjects: *namespacedProjects,
+		Namespace:          *namespace,
+	})
 	if err != nil {
+		logger.L().Error("Module initialization failed", zap.Error(err))
 		panic("auth module initialization failed")
 	}
-	a.RegisterModule(authModule)
+	err = a.RegisterModule(authModule)
+	if err != nil {
+		logger.L().Error("Module registration failed", zap.Error(err))
+		panic("auth module registration failed")
+	}
 
 	// Register other modules that require authentication
 	authenticatedModules := []struct {
@@ -56,8 +67,8 @@ func main() {
 		{
 			func() (app.Module, error) {
 				return projects.New(projects.Config{
-					ProjectLabelNamespaceSelector: *projectLabelNamespaceSelector,
-					ProjectNameLabel:              *projectNameLabel,
+					NamespacedProjects: *namespacedProjects,
+					Namespace:          *namespace,
 				})
 			},
 		},
@@ -66,9 +77,14 @@ func main() {
 	for _, md := range authenticatedModules {
 		mod, err := md.init()
 		if err != nil {
+			logger.L().Error("Module initialization failed", zap.Error(err))
 			panic("module init failed")
 		}
-		a.RegisterModule(mod, authModule.AuthMiddleware())
+		err = a.RegisterModule(mod, authModule.AuthMiddleware())
+		if err != nil {
+			logger.L().Error("Module registration failed", zap.Error(err))
+			panic("module registration failed")
+		}
 	}
 
 	a.Run(*listen)
