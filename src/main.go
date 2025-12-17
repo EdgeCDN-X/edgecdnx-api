@@ -8,6 +8,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -71,6 +72,10 @@ func main() {
 			panic("module registration failed")
 		}
 	}
+
+	a.Engine.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 
 	a.Run(*listen)
 }
