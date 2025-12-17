@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-
 	"flag"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
@@ -10,8 +8,6 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"go.uber.org/zap"
 )
 
@@ -28,17 +24,6 @@ func main() {
 
 	logger.Init(*production)
 	a := app.New(*production)
-
-	// Cookie store and Session middleware initialization
-	cookie_secret, set := os.LookupEnv("EDGECDNX_API_COOKIE_SECRET")
-	if !set || cookie_secret == "" {
-		logger.L().Fatal("EDGECDNX_API_COOKIE_SECRET environment variable not set")
-		os.Exit(1)
-	}
-
-	// Register global middleware for sessions
-	store := cookie.NewStore([]byte(cookie_secret))
-	a.Engine.Use(sessions.Sessions("dex", store))
 
 	// Register Auth module. This exposes our Auth middleware
 	authModule, err := auth.New(auth.Config{
