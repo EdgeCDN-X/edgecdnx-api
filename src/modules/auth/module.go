@@ -113,8 +113,6 @@ func (m *Module) Init() error {
 		Resource: "projects",
 	}).Informer()
 
-	logger.L().Info("Initializing Auth module 2")
-
 	stop := make(chan struct{})
 	m.Informer = informer
 	m.informerChan = stop

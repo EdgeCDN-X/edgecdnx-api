@@ -1,0 +1,76 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-amd64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64        # native
+          push: true
+          tags: |
+            fr6nco/edgecdnx-api:amd64-${{ github.ref_name }}
+
+  build-arm64:
+    runs-on: ubuntu-24.04-arm           # <-- real ARM runner, no QEMU!!!
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64         # native ARM64
+          push: true
+          tags: |
+            fr6nco/edgecdnx-api:arm64-${{ github.ref_name }}
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs:
+      - build-amd64
+      - build-arm64
+
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create & push manifest
+        run: |
+          docker manifest create fr6nco/edgecdnx-api:${{ github.ref_name }} \
+            --amend fr6nco/edgecdnx-api:amd64-${{ github.ref_name }} \
+            --amend fr6nco/edgecdnx-api:arm64-${{ github.ref_name }}
+
+          docker manifest push fr6nco/edgecdnx-api:${{ github.ref_name }}
+
+      - name: Push :latest manifest
+        if: ${{ github.ref_name == 'main' }}
+        run: |
+          docker manifest create fr6nco/edgecdnx-api:latest \
+            --amend fr6nco/edgecdnx-api:amd64-main \
+            --amend fr6nco/edgecdnx-api:arm64-main
+
+          docker manifest push fr6nco/edgecdnx-api:latest
