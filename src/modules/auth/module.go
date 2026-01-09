@@ -68,8 +68,8 @@ func (m *Module) AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-func New(cfg Config) (*Module, error) {
-	return &Module{cfg: cfg}, nil
+func New(cfg Config) *Module {
+	return &Module{cfg: cfg}
 }
 
 func (m *Module) Shutdown() {

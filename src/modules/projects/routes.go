@@ -158,11 +158,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 		Object: objMap,
 	}
 
-	// TODO create namespace when projects are namespaced
-	ns := uuid
-	if !m.cfg.NamespacedProjects {
-		ns = m.cfg.Namespace
-	}
+	ns := m.cfg.Namespace
 
 	createdObj, err := m.client.Resource(schema.GroupVersionResource{
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,

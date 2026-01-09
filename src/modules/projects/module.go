@@ -16,8 +16,7 @@ import (
 )
 
 type Config struct {
-	NamespacedProjects bool
-	Namespace          string
+	Namespace string
 }
 
 type Module struct {
@@ -27,8 +26,8 @@ type Module struct {
 	informerChan chan struct{}
 }
 
-func New(cfg Config) (*Module, error) {
-	return &Module{cfg: cfg}, nil
+func New(cfg Config) *Module {
+	return &Module{cfg: cfg}
 }
 
 func (m *Module) Shutdown() {
@@ -47,12 +46,7 @@ func (m *Module) Init() error {
 
 	m.client = client
 
-	ns := ""
-	if !m.cfg.NamespacedProjects {
-		ns = m.cfg.Namespace
-	}
-
-	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, ns, nil)
+	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, m.cfg.Namespace, nil)
 	informer := fac.ForResource(schema.GroupVersionResource{
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
