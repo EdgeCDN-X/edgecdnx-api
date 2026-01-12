@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/casbin/casbin/v3"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
 type Module interface {
-	RegisterRoutes(r *gin.Engine, middlewares ...gin.HandlerFunc)
+	SetMiddlewares(...gin.HandlerFunc)
+	SetEnforcer(enforcer *casbin.Enforcer)
+	RegisterRoutes(r *gin.Engine)
 	Init() error
 	Shutdown()
 }
@@ -36,13 +39,13 @@ func New(production bool) *App {
 	}
 }
 
-func (a *App) RegisterModule(m Module, middlewares ...gin.HandlerFunc) error {
+func (a *App) RegisterModule(m Module) error {
 	a.Modules = append(a.Modules, m)
 	err := m.Init()
 	if err != nil {
 		return err
 	}
-	m.RegisterRoutes(a.Engine, middlewares...)
+	m.RegisterRoutes(a.Engine)
 	return nil
 }
 

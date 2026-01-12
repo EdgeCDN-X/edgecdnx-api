@@ -1,71 +1,75 @@
 package projects
 
 import (
-	"fmt"
+	"strings"
 
-	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"go.uber.org/zap"
-	v1 "k8s.io/api/core/v1"
+	"github.com/gosimple/slug"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func (m *Module) RegisterRoutes(r *gin.Engine, middleWares ...gin.HandlerFunc) {
-	group := r.Group("/projects", middleWares...)
+var gvr = schema.GroupVersionResource{
+	Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
+	Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
+	Resource: "projects",
+}
+
+func (m *Module) RegisterRoutes(r *gin.Engine) {
+	group := r.Group("/projects", m.middlewares...)
 
 	group.GET("", func(c *gin.Context) {
-		p := m.Informer.GetIndexer().List()
-		projectList := make([]*infrastructurev1alpha1.Project, 0, len(p))
-		for _, obj := range p {
-			p_raw, ok := obj.(*unstructured.Unstructured)
-			if !ok {
-				c.JSON(500, gin.H{"error": "internal error"})
-				return
-			}
 
+		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to list projects: " + err.Error()})
+			return
+		}
+
+		projects := []infrastructurev1alpha1.Project{}
+
+		for _, item := range objList.Items {
 			project := &infrastructurev1alpha1.Project{}
-			err := runtime.DefaultUnstructuredConverter.FromUnstructured(p_raw.Object, project)
+			err = runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, project)
 			if err != nil {
 				c.JSON(500, gin.H{"error": "internal error"})
 				return
 			}
 
-			projectList = append(projectList, project)
+			allowed, err := m.enforcer.Enforce(c.GetString("user_id"), project.Name, "project", "read")
+			if err != nil || !allowed {
+				continue
+			}
+
+			projects = append(projects, *project)
 		}
 
-		claims, _ := c.Get("claims")
-		// Try to log claims as is, or assert to a slice/map if needed
-		if claimsMap, ok := claims.(map[string]interface{}); ok {
-			logger.L().Info("Claims from token", zap.Any("claim", claimsMap["email"]))
-		} else {
-			logger.L().Info("Claims from token: unable to assert claims type", zap.Any("claim", claims))
-		}
+		c.JSON(200, projects)
 
-		c.JSON(200, projectList)
 		return
 	})
 
-	group.GET(":project", func(c *gin.Context) {
-		name := c.Param("projectName")
-		p, _ := m.Informer.GetIndexer().ByIndex("projectName", name)
+	group.GET(":project-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("project").S("user_id").A("read").Build(), func(c *gin.Context) {
 
-		if len(p) == 0 {
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, c.Param("project-id"), metav1.GetOptions{})
+
+		if err != nil {
 			c.JSON(404, gin.H{"error": "project not found"})
 			return
 		}
 
-		if len(p) > 1 {
-			logger.L().Error("Multiple projects found with the same name", zap.String("name", name))
+		project := &infrastructurev1alpha1.Project{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, project)
+		if err != nil {
 			c.JSON(500, gin.H{"error": "internal error"})
 			return
 		}
 
-		c.JSON(200, p[0].(*v1.Namespace))
+		c.JSON(200, project)
 		return
 	})
 
@@ -89,58 +93,65 @@ func (m *Module) RegisterRoutes(r *gin.Engine, middleWares ...gin.HandlerFunc) {
 }
 
 func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1alpha1.Project, int, error) {
+	slug.MaxLength = 63
+	name := slug.Make(dto.Name)
 
-	p, err := m.Informer.GetIndexer().ByIndex("projectName", dto.Name)
-
-	if err != nil {
-		return infrastructurev1alpha1.Project{}, 500, err
+	_, obj := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, name, metav1.GetOptions{})
+	if obj == nil {
+		// Project with this name already exists
+		return infrastructurev1alpha1.Project{}, 409, nil
 	}
 
-	if len(p) > 0 {
-		return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("project with name %s already exists", dto.Name)
-	}
-
-	// Generate UUID for project name
-	uuid := uuid.New().String()
 	project := &infrastructurev1alpha1.Project{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(),
 			Kind:       "Project",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: uuid,
+			Name: name,
+			Labels: map[string]string{
+				"edgecdnx.com/project-name": dto.Name,
+				"edgecdnx.com/created-by":   slug.Make(strings.ReplaceAll(c.GetString("user_id"), "@", "-at-")),
+			},
 		},
 		Spec: infrastructurev1alpha1.ProjectSpec{
 			Name:        dto.Name,
 			Description: dto.Description,
 			Rbac: infrastructurev1alpha1.RBACSpec{
-				Groups: []infrastructurev1alpha1.RuleSpec{},
+				Groups: []infrastructurev1alpha1.RuleSpec{
+					{
+						PType: "g",
+						V0:    c.GetString("user_id"),
+						V1:    "admin",
+						V2:    name,
+					},
+				},
 				Rules: []infrastructurev1alpha1.RuleSpec{
 					{
 						PType: "p",
 						V0:    "admin",
-						V1:    uuid,
+						V1:    name,
 						V2:    "*",
 						V3:    "create",
 					},
 					{
 						PType: "p",
 						V0:    "admin",
-						V1:    uuid,
+						V1:    name,
 						V2:    "*",
 						V3:    "read",
 					},
 					{
 						PType: "p",
 						V0:    "admin",
-						V1:    uuid,
+						V1:    name,
 						V2:    "*",
 						V3:    "write",
 					},
 					{
 						PType: "p",
 						V0:    "admin",
-						V1:    uuid,
+						V1:    name,
 						V2:    "*",
 						V3:    "delete",
 					},
