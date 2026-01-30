@@ -9,6 +9,10 @@ type AppConfig struct {
 	Production bool
 	Listen     string
 	Namespace  string
+
+	CorsAllowOrigins   []string
+	CorsAllowedMethods []string
+	CorsAllowedHeaders []string
 }
 
 type ModuleDef struct {
