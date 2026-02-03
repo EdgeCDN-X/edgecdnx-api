@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
 )
 
 type AppConfig struct {
@@ -13,6 +14,8 @@ type AppConfig struct {
 	CorsAllowOrigins   []string
 	CorsAllowedMethods []string
 	CorsAllowedHeaders []string
+
+	ServiceBaseDomain string
 }
 
 type ModuleDef struct {
@@ -25,6 +28,14 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			func() app.Module {
 				return projects.New(projects.Config{
 					Namespace: a.Namespace,
+				})
+			},
+		},
+		{
+			func() app.Module {
+				return services.New(services.Config{
+					Namespace:         a.Namespace,
+					ServiceBaseDomain: a.ServiceBaseDomain,
 				})
 			},
 		},

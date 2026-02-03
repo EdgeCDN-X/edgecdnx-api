@@ -22,6 +22,7 @@ func main() {
 	cors_allow_origins := flag.String("cors_allow_origins", "*", "Comma-separated list of allowed CORS origins")
 	cors_allowed_methods := flag.String("cors_allowed_methods", "GET,PUT,POST,PATCH,DELETE", "Comma-separated list of allowed CORS methods")
 	cors_allowed_headers := flag.String("cors_allowed_headers", "Authorization,Content-Type", "Comma-separated list of allowed CORS headers")
+	service_base_domain := flag.String("service_base_domain", "democdn.edgecdnx.com", "Base domain for services")
 
 	flag.Parse()
 
@@ -32,6 +33,7 @@ func main() {
 		CorsAllowOrigins:   strings.Split(*cors_allow_origins, ","),
 		CorsAllowedMethods: strings.Split(*cors_allowed_methods, ","),
 		CorsAllowedHeaders: strings.Split(*cors_allowed_headers, ","),
+		ServiceBaseDomain:  *service_base_domain,
 	}
 
 	logger.Init(appcfg.Production)

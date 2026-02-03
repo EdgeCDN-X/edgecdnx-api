@@ -110,7 +110,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				"edgecdnx.com/project-name": dto.Name,
+				"edgecdnx.com/project-name": name,
 				"edgecdnx.com/created-by":   slug.Make(strings.ReplaceAll(c.GetString("user_id"), "@", "-at-")),
 			},
 		},
