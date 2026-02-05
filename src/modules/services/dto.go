@@ -4,17 +4,18 @@ type StaticOriginDto struct {
 	Upstream   string `json:"upstream" binding:"required"`
 	HostHeader string `json:"hostHeader"`
 	Port       int    `json:"port" binding:"min=1,max=65535"`
-	Scheme     string `json:"scheme" binding:"required,oneof=http https"`
+	Scheme     string `json:"scheme" binding:"required,oneof=Http Https"`
 }
 
 type S3OriginSpecDto struct {
 	AwsSigsVersion int    `json:"awsSigsVersion" binding:"required,oneof=2 4"`
 	S3AccessKeyId  string `json:"s3AccessKeyId" binding:"required"`
-	S3Region       string `json:"s3Region" binding:"required"`
 	S3SecretKey    string `json:"s3SecretKey" binding:"required"`
+	S3BucketName   string `json:"s3BucketName" binding:"required"`
+	S3Region       string `json:"s3Region" binding:"required"`
 	S3Server       string `json:"s3Server" binding:"required"`
-	S3ServerPort   int    `json:"s3ServerPort" binding:"required"`
 	S3ServerProto  string `json:"s3ServerProto" binding:"required,oneof=http https"`
+	S3ServerPort   int    `json:"s3ServerPort" binding:"required"`
 	S3Style        string `json:"s3Style" binding:"required,oneof=path virtual"`
 }
 
