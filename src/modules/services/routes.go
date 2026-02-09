@@ -9,6 +9,7 @@ import (
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"github.com/gosimple/slug"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -151,6 +152,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(service)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "internal error"})
+			return
 		}
 
 		serviceUnstructured := unstructured.Unstructured{
@@ -161,6 +163,16 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 		createdObj, err := m.client.Resource(gvr).Namespace(ns).Create(c, &serviceUnstructured, metav1.CreateOptions{})
 		if err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				c.JSON(409, gin.H{"error": "service with the same name already exists. Services must have unique names within the platform."})
+				return
+			}
+
+			if apierrors.IsBadRequest(err) {
+				c.JSON(400, gin.H{"error": "bad request: " + err.Error()})
+				return
+			}
+
 			c.JSON(500, gin.H{"error": "failed to create service: " + err.Error()})
 			return
 		}

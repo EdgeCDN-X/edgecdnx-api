@@ -1,12 +1,14 @@
 package projects
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"github.com/gosimple/slug"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -83,7 +85,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 		proj, retCode, err := m.createProject(c, dto)
 		if err != nil {
-			c.JSON(retCode, gin.H{"error": "failed to create project: " + err.Error()})
+			c.JSON(retCode, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -97,9 +99,9 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 	name := slug.Make(dto.Name)
 
 	_, obj := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, name, metav1.GetOptions{})
-	if obj == nil {
+	if obj != nil {
 		// Project with this name already exists
-		return infrastructurev1alpha1.Project{}, 409, nil
+		return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("project with the same name already exists. Projects must have unique names within the platform")
 	}
 
 	project := &infrastructurev1alpha1.Project{
@@ -178,6 +180,10 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 	}).Namespace(ns).Create(c, &projectUnstructured, metav1.CreateOptions{})
 
 	if err != nil {
+		if apierrors.IsBadRequest(err) {
+			return infrastructurev1alpha1.Project{}, 409, err
+		}
+
 		return infrastructurev1alpha1.Project{}, 500, err
 	}
 
