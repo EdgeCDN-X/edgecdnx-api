@@ -2,7 +2,7 @@ package services
 
 type StaticOriginDto struct {
 	Upstream   string `json:"upstream" binding:"required"`
-	HostHeader string `json:"hostHeader"`
+	HostHeader string `json:"hostHeader" binding:"required"`
 	Port       int    `json:"port" binding:"min=1,max=65535"`
 	Scheme     string `json:"scheme" binding:"required,oneof=Http Https"`
 }
