@@ -187,4 +187,156 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(201, returnedService)
 		return
 	})
+
+	group.POST("/:service-id/keys", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+		var dto CreateKeyDto
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+
+		keyName := dto.Name
+		if keyName == "" {
+			c.JSON(400, gin.H{"error": "key name is required"})
+			return
+		}
+
+		serviceId := c.Param("service-id")
+
+		// Check if service exists
+		_, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		newKey := &infrastructurev1alpha1.SecureKeySpec{
+			Name: keyName,
+			Value: func() string {
+				const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+				b := make([]byte, 32)
+				for i := range b {
+					b[i] = letters[rand.Intn(len(letters))]
+				}
+				return string(b)
+			}(),
+			CreatedAt: metav1.Time{Time: time.Now()},
+		}
+
+		// Create the new key
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		service := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		service.Spec.SecureKeys = append(service.Spec.SecureKeys, *newKey)
+
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		serviceUnstructured := unstructured.Unstructured{
+			Object: objMap,
+		}
+
+		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to update service with new key: " + err.Error()})
+			return
+		}
+
+		returnedService := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(updatedObj.Object, returnedService)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		c.JSON(200, returnedService)
+		return
+	})
+
+	group.DELETE("/:service-id/keys/:key-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+		serviceId := c.Param("service-id")
+		keyName := c.Param("key-name")
+
+		// Check if service exists
+		_, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		service := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		keys := service.Spec.SecureKeys
+		newKeys := []infrastructurev1alpha1.SecureKeySpec{}
+		for _, key := range keys {
+			if key.Name != keyName {
+				newKeys = append(newKeys, key)
+			}
+		}
+
+		if len(keys) == len(newKeys) {
+			c.JSON(404, gin.H{"error": "key not found"})
+			return
+		}
+
+		service.Spec.SecureKeys = newKeys
+
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		serviceUnstructured := unstructured.Unstructured{
+			Object: objMap,
+		}
+
+		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to update service after deleting key: " + err.Error()})
+			return
+		}
+
+		returnedService := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(updatedObj.Object, returnedService)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		c.JSON(200, returnedService)
+		return
+	})
 }

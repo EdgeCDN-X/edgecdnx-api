@@ -148,7 +148,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 						V0:    "admin",
 						V1:    name,
 						V2:    "*",
-						V3:    "write",
+						V3:    "update",
 					},
 					{
 						PType: "p",

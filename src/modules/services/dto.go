@@ -40,3 +40,7 @@ type ServiceDto struct {
 	SignedUrlsEnabled bool `json:"signedUrlsEnabled"`
 	WafEnabled        bool `json:"wafEnabled"`
 }
+
+type CreateKeyDto struct {
+	Name string `json:"name" binding:"required,min=3,max=32,alphanum"`
+}
