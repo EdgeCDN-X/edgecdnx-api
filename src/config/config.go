@@ -4,6 +4,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/zones"
 )
 
 type AppConfig struct {
@@ -36,6 +37,13 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 				return services.New(services.Config{
 					Namespace:         a.Namespace,
 					ServiceBaseDomain: a.ServiceBaseDomain,
+				})
+			},
+		},
+		{
+			func() app.Module {
+				return zones.New(zones.Config{
+					Namespace: a.Namespace,
 				})
 			},
 		},
