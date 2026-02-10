@@ -44,3 +44,13 @@ type ServiceDto struct {
 type CreateKeyDto struct {
 	Name string `json:"name" binding:"required,min=3,max=32,alphanum"`
 }
+
+// Generic object to update several fields
+type ServiceUpdateDto struct {
+	Cache        string           `json:"cache,omitempty"`
+	CacheKey     *CacheKeyDto     `json:"cacheKey,omitempty"`
+	OriginType   string           `json:"originType,omitempty" binding:"omitempty,oneof=s3 static"`
+	StaticOrigin *StaticOriginDto `json:"staticOrigin,omitempty"`
+	S3OriginSpec *S3OriginSpecDto `json:"s3OriginSpec,omitempty"`
+	WafEnabled   *bool            `json:"wafEnabled,omitempty"`
+}

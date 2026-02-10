@@ -188,6 +188,118 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
+	group.PATCH("/:service-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+		var dto ServiceUpdateDto
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+
+		serviceId := c.Param("service-id")
+
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		service := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		if dto.Cache != "" {
+			service.Spec.Cache = dto.Cache
+		}
+
+		if dto.OriginType != "" {
+			service.Spec.OriginType = dto.OriginType
+			if dto.OriginType == "static" {
+				service.Spec.S3OriginSpec = nil
+				if dto.StaticOrigin == nil {
+					c.JSON(400, gin.H{"error": "staticOrigin must be provided when originType is static"})
+					return
+				}
+			} else if dto.OriginType == "s3" {
+				service.Spec.StaticOrigins = nil
+				if dto.S3OriginSpec == nil {
+					c.JSON(400, gin.H{"error": "s3OriginSpec must be provided when originType is s3"})
+					return
+				}
+			}
+		}
+
+		if dto.StaticOrigin != nil {
+			service.Spec.StaticOrigins = []infrastructurev1alpha1.StaticOriginSpec{
+				{
+					Upstream:   dto.StaticOrigin.Upstream,
+					Port:       dto.StaticOrigin.Port,
+					HostHeader: dto.StaticOrigin.HostHeader,
+					Scheme:     dto.StaticOrigin.Scheme,
+				},
+			}
+		}
+
+		if dto.S3OriginSpec != nil {
+			service.Spec.S3OriginSpec = []infrastructurev1alpha1.S3OriginSpec{
+				{
+					AwsSigsVersion: dto.S3OriginSpec.AwsSigsVersion,
+					S3AccessKeyId:  dto.S3OriginSpec.S3AccessKeyId,
+					S3SecretKey:    dto.S3OriginSpec.S3SecretKey,
+					S3BucketName:   dto.S3OriginSpec.S3BucketName,
+					S3Region:       dto.S3OriginSpec.S3Region,
+					S3Server:       dto.S3OriginSpec.S3Server,
+					S3ServerProto:  dto.S3OriginSpec.S3ServerProto,
+					S3ServerPort:   dto.S3OriginSpec.S3ServerPort,
+					S3Style:        dto.S3OriginSpec.S3Style,
+				},
+			}
+		}
+
+		if dto.WafEnabled != nil {
+			service.Spec.Waf.Enabled = *dto.WafEnabled
+		}
+
+		if dto.CacheKey != nil {
+			service.Spec.CacheKeySpec = infrastructurev1alpha1.CacheKeySpec{
+				Headers:     dto.CacheKey.Headers,
+				QueryParams: dto.CacheKey.QueryParams,
+			}
+		}
+
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		serviceUnstructured := unstructured.Unstructured{
+			Object: objMap,
+		}
+
+		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to update service: " + err.Error()})
+			return
+		}
+
+		returnedService := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(updatedObj.Object, returnedService)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		c.JSON(200, returnedService)
+		return
+	})
+
 	group.POST("/:service-id/keys", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto CreateKeyDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
