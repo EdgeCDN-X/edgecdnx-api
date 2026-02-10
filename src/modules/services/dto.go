@@ -14,7 +14,7 @@ type S3OriginSpecDto struct {
 	S3BucketName   string `json:"s3BucketName" binding:"required"`
 	S3Region       string `json:"s3Region" binding:"required"`
 	S3Server       string `json:"s3Server" binding:"required"`
-	S3ServerProto  string `json:"s3ServerProto" binding:"required,oneof=http https"`
+	S3ServerProto  string `json:"s3ServerProto" binding:"required,oneof=Http Https"`
 	S3ServerPort   int    `json:"s3ServerPort" binding:"required"`
 	S3Style        string `json:"s3Style" binding:"required,oneof=path virtual"`
 }
