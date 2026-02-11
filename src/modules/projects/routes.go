@@ -98,10 +98,15 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 	slug.MaxLength = 63
 	name := slug.Make(dto.Name)
 
-	_, obj := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, name, metav1.GetOptions{})
+	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, name, metav1.GetOptions{})
 	if obj != nil {
 		// Project with this name already exists
 		return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("project with the same name already exists. Projects must have unique names within the platform")
+	}
+
+	if err != nil && !apierrors.IsNotFound(err) {
+		// An error other than "not found" occurred
+		return infrastructurev1alpha1.Project{}, 500, fmt.Errorf("failed to check for existing project: %w", err)
 	}
 
 	project := &infrastructurev1alpha1.Project{
