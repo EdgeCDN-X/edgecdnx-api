@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
@@ -451,4 +452,136 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(200, returnedService)
 		return
 	})
+
+	group.POST("/:service-id/host-alias", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+		var dto HostAliasDto
+		if err := c.ShouldBindJSON(&dto); err != nil {
+
+			fmt.Printf("%v", dto)
+
+			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+
+		serviceId := c.Param("service-id")
+
+		// Check if service exists
+		service, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		serviceObj := &infrastructurev1alpha1.Service{}
+
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(service.Object, serviceObj)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+		}
+
+		if slices.ContainsFunc(serviceObj.Spec.HostAliases, func(n infrastructurev1alpha1.HostAliasSpec) bool {
+			return n.Name == dto.Name
+		}) {
+			c.JSON(409, gin.H{"error": "Host Alias already registered with the service"})
+		}
+
+		serviceObj.Spec.HostAliases = append(serviceObj.Spec.HostAliases, infrastructurev1alpha1.HostAliasSpec{
+			Name: dto.Name,
+		})
+
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(serviceObj)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		serviceUnstructured := unstructured.Unstructured{
+			Object: objMap,
+		}
+
+		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to add hostAlias to service: " + err.Error()})
+			return
+		}
+
+		returnedService := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(updatedObj.Object, returnedService)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		c.JSON(200, returnedService)
+		return
+	})
+
+	group.DELETE("/:service-id/host-alias/:alias-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+		serviceId := c.Param("service-id")
+		aliasName := c.Param("alias-name")
+
+		// Check if service exists
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		service := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		aliases := service.Spec.HostAliases
+		newAliases := []infrastructurev1alpha1.HostAliasSpec{}
+		for _, alias := range aliases {
+			if alias.Name != aliasName {
+				newAliases = append(newAliases, alias)
+			}
+		}
+
+		if len(aliases) == len(newAliases) {
+			c.JSON(404, gin.H{"error": "Alias not found"})
+			return
+		}
+
+		service.Spec.HostAliases = newAliases
+
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(service)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		serviceUnstructured := unstructured.Unstructured{
+			Object: objMap,
+		}
+
+		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to update service after removing host Alias: " + err.Error()})
+			return
+		}
+
+		returnedService := &infrastructurev1alpha1.Service{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(updatedObj.Object, returnedService)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		c.JSON(200, returnedService)
+		return
+	})
+
 }
