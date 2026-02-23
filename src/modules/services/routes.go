@@ -481,12 +481,14 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		err = runtime.DefaultUnstructuredConverter.FromUnstructured(service.Object, serviceObj)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "internal error"})
+			return
 		}
 
 		if slices.ContainsFunc(serviceObj.Spec.HostAliases, func(n infrastructurev1alpha1.HostAliasSpec) bool {
 			return n.Name == dto.Name
 		}) {
 			c.JSON(409, gin.H{"error": "Host Alias already registered with the service"})
+			return
 		}
 
 		serviceObj.Spec.HostAliases = append(serviceObj.Spec.HostAliases, infrastructurev1alpha1.HostAliasSpec{
