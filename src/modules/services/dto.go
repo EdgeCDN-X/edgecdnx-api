@@ -54,3 +54,9 @@ type ServiceUpdateDto struct {
 	S3OriginSpec *S3OriginSpecDto `json:"s3OriginSpec,omitempty"`
 	WafEnabled   *bool            `json:"wafEnabled,omitempty"`
 }
+
+type ServiceDetailsDto struct {
+	ServiceId            string `json:"serviceId"`
+	CertificateStatus    any    `json:"certificateStatus,omitempty"`
+	ApplicationSetStatus any    `json:"applicationSetStatus,omitempty"`
+}

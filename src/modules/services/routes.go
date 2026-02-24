@@ -301,6 +301,62 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
+	group.GET("/:service-id/status", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("read").Build(), func(c *gin.Context) {
+		serviceId := c.Param("service-id")
+
+		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				c.JSON(404, gin.H{"error": "service not found"})
+				return
+			}
+			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
+			return
+		}
+
+		ret := &ServiceDetailsDto{
+			ServiceId: serviceId,
+		}
+
+		// For example, fetching a Certificate CRD from cert-manager
+		certgvr := schema.GroupVersionResource{
+			Group:    "cert-manager.io",
+			Version:  "v1", // or v1alpha2 depending on your cluster
+			Resource: "certificates",
+		}
+
+		obj, err = m.client.Resource(certgvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				c.JSON(500, gin.H{"error": "failed to retrieve certificate: " + err.Error()})
+				return
+			}
+		} else {
+			ret.CertificateStatus = obj.Object["status"]
+		}
+
+		// For example, fetching a Certificate CRD from cert-manager
+		appsetgvr := schema.GroupVersionResource{
+			Group:    "argoproj.io",
+			Version:  "v1alpha1", // or v1 depending on your cluster
+			Resource: "applicationsets",
+		}
+
+		obj, err = m.client.Resource(appsetgvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				c.JSON(500, gin.H{"error": "failed to retrieve applicationset: " + err.Error()})
+				return
+			}
+		} else {
+			ret.ApplicationSetStatus = obj.Object["status"]
+		}
+
+		// Since it's unstructured, you can return obj.Object directly
+		c.JSON(200, ret)
+		return
+	})
+
 	group.POST("/:service-id/keys", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto CreateKeyDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
