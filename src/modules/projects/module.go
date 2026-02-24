@@ -27,7 +27,7 @@ func (m *Module) Shutdown() {}
 
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
-	client, err := app.GetK8SDynamicClient()
+	client, _, err := app.GetK8SDynamicClient()
 	if err != nil {
 		return err
 	}

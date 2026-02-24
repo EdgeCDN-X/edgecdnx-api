@@ -8,6 +8,7 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 type Config struct {
@@ -19,6 +20,7 @@ type Module struct {
 	client      *dynamic.DynamicClient
 	middlewares []gin.HandlerFunc
 	enforcer    *casbin.Enforcer
+	baseCfg     *rest.Config
 }
 
 func New(cfg Config) *Module {
@@ -29,12 +31,13 @@ func (m *Module) Shutdown() {}
 
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
-	client, err := app.GetK8SDynamicClient()
+	client, baseCfg, err := app.GetK8SDynamicClient()
 	if err != nil {
 		return err
 	}
 
 	m.client = client
+	m.baseCfg = baseCfg
 
 	return nil
 }

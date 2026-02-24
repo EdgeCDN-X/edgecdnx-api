@@ -132,7 +132,7 @@ func (m *Module) Init() error {
 	// Initialize with super admin rights
 	adapter := stringadapter.NewAdapter("p, portal-admin, *, *, *")
 
-	client, err := app.GetK8SDynamicClient()
+	client, _, err := app.GetK8SDynamicClient()
 	if err != nil {
 		return err
 	}

@@ -101,4 +101,24 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(201, createdZone)
 		return
 	})
+
+	group.DELETE("/:zone-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("delete").Build(), func(c *gin.Context) {
+		err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Delete(c, c.Param("zone-id"), metav1.DeleteOptions{})
+		if err != nil {
+			if statusErr, ok := err.(*apierrors.StatusError); ok {
+				c.JSON(int(statusErr.ErrStatus.Code), gin.H{
+					"error":   statusErr.ErrStatus.Message,
+					"reason":  statusErr.ErrStatus.Reason,
+					"details": statusErr.ErrStatus.Details,
+				})
+				return
+			}
+
+			c.JSON(500, gin.H{"error": "failed to delete zone: " + err.Error()})
+			return
+		}
+
+		c.Status(204)
+		return
+	})
 }
