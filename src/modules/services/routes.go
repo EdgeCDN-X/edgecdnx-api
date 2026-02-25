@@ -73,8 +73,8 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 				Kind:       "Service",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: m.cfg.Namespace,
+				GenerateName: name + "-",
+				Namespace:    m.cfg.Namespace,
 				Labels: map[string]string{
 					"project": c.Param("project-id"),
 				},
