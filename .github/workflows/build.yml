@@ -28,7 +28,7 @@ jobs:
             fr6nco/edgecdnx-api:amd64-${{ github.ref_name }}
 
   build-arm64:
-    runs-on: ubuntu-24.04-arm           # <-- real ARM runner, no QEMU!!!
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
