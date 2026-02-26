@@ -59,6 +59,28 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			return
 		}
 
+		services := &infrastructurev1alpha1.ServiceList{}
+		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
+			LabelSelector: "project=" + c.Param("project-id"),
+		})
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to list services: " + err.Error()})
+			return
+		}
+
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(objList.UnstructuredContent(), services)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "internal error"})
+			return
+		}
+
+		for _, service := range services.Items {
+			if service.Spec.Name == dto.Name {
+				c.JSON(409, gin.H{"error": "service with the same name already exists. Services must have unique names within a Project."})
+				return
+			}
+		}
+
 		const letters = "abcdefghijklmnopqrstuvwxyz"
 		b := make([]byte, 16)
 		for i := range b {
