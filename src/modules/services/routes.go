@@ -155,6 +155,10 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 					return nil
 				}(),
 				Cache: dto.Cache,
+				Path: infrastructurev1alpha1.PathSpec{
+					Paths:   dto.Path.Paths,
+					Rewrite: dto.Path.Rewrite,
+				},
 				CacheKeySpec: infrastructurev1alpha1.CacheKeySpec{
 					Headers:     dto.CacheKey.Headers,
 					QueryParams: dto.CacheKey.QueryParams,
@@ -293,6 +297,13 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			service.Spec.CacheKeySpec = infrastructurev1alpha1.CacheKeySpec{
 				Headers:     dto.CacheKey.Headers,
 				QueryParams: dto.CacheKey.QueryParams,
+			}
+		}
+
+		if dto.Path != nil {
+			service.Spec.Path = infrastructurev1alpha1.PathSpec{
+				Paths:   dto.Path.Paths,
+				Rewrite: dto.Path.Rewrite,
 			}
 		}
 

@@ -28,6 +28,11 @@ type CacheKeyDto struct {
 	QueryParams []string `json:"queryParams,omitempty"`
 }
 
+type PathDto struct {
+	Paths   []string `json:"paths" binding:"required"`
+	Rewrite string   `json:"rewrite,omitempty"`
+}
+
 type ServiceDto struct {
 	Name         string           `json:"name" binding:"required,min=3,max=63"`
 	OriginType   string           `json:"originType" binding:"required,oneof=s3 static"`
@@ -36,6 +41,7 @@ type ServiceDto struct {
 	Cache        string           `json:"cache" binding:"required"`
 	HostAliases  []HostAliasDto   `json:"hostAliases,omitempty"`
 	CacheKey     *CacheKeyDto     `json:"cacheKey,omitempty"`
+	Path         PathDto          `json:"path,omitempty"`
 
 	SignedUrlsEnabled bool `json:"signedUrlsEnabled"`
 	WafEnabled        bool `json:"wafEnabled"`
@@ -53,6 +59,7 @@ type ServiceUpdateDto struct {
 	StaticOrigin *StaticOriginDto `json:"staticOrigin,omitempty"`
 	S3OriginSpec *S3OriginSpecDto `json:"s3OriginSpec,omitempty"`
 	WafEnabled   *bool            `json:"wafEnabled,omitempty"`
+	Path         *PathDto         `json:"path,omitempty"`
 }
 
 type ServiceDetailsDto struct {
