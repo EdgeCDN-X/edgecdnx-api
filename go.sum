@@ -1,5 +1,5 @@
-github.com/EdgeCDN-X/edgecdnx-controller v0.21.0 h1:ZjvVkR4m0u7MIw04xl2qjeIpO9XhdJYpbCny7govwlI=
-github.com/EdgeCDN-X/edgecdnx-controller v0.21.0/go.mod h1:z/IBwK9ek4IrXzV3E25RPou7Ys2DVHTC9+izy7KzA0g=
+github.com/EdgeCDN-X/edgecdnx-controller v0.25.0 h1:ToV5O51KjnXpnYXcsoWfOyvBdVG/R2s/XjLXl+ugNB8=
+github.com/EdgeCDN-X/edgecdnx-controller v0.25.0/go.mod h1:z/IBwK9ek4IrXzV3E25RPou7Ys2DVHTC9+izy7KzA0g=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bmatcuk/doublestar/v4 v4.6.1/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
