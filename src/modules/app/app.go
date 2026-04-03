@@ -22,9 +22,14 @@ type Module interface {
 	Shutdown()
 }
 
+type ModuleBase struct {
+	Module
+	Name string
+}
+
 type App struct {
 	Engine  *gin.Engine
-	Modules []Module
+	Modules []ModuleBase
 }
 
 func New(production bool) *App {
@@ -35,17 +40,26 @@ func New(production bool) *App {
 
 	return &App{
 		Engine:  g,
-		Modules: []Module{},
+		Modules: []ModuleBase{},
 	}
 }
 
-func (a *App) RegisterModule(m Module) error {
-	a.Modules = append(a.Modules, m)
+func (a *App) RegisterModule(m Module, name string) error {
+	a.Modules = append(a.Modules, ModuleBase{Module: m, Name: name})
 	err := m.Init()
 	if err != nil {
 		return err
 	}
 	m.RegisterRoutes(a.Engine)
+	return nil
+}
+
+func (a *App) GetModule(name string) Module {
+	for _, m := range a.Modules {
+		if m.Name == name {
+			return m.Module
+		}
+	}
 	return nil
 }
 

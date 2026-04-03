@@ -1,13 +1,16 @@
 package projects
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"github.com/gosimple/slug"
+	"go.uber.org/zap"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -43,7 +46,24 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			}
 
 			allowed, err := m.enforcer.Enforce(c.GetString("user_id"), project.Name, "project", "read")
-			if err != nil || !allowed {
+			if err != nil {
+				continue
+			}
+			if !allowed {
+				groups := c.GetString("groups")
+				logger.L().Debug("User does not have access to project, checking group permissions", zap.String("project", project.Name), zap.String("groups", groups))
+				for g := range strings.SplitSeq(groups, ",") {
+					logger.L().Debug("Checking access for oidc group", zap.String("group", g), zap.String("project", project.Name))
+					allowed, err := m.enforcer.Enforce(g, project.Name, "project", "read")
+					if err != nil {
+						continue
+					}
+
+					if allowed {
+						projects = append(projects, *project)
+						break
+					}
+				}
 				continue
 			}
 
@@ -82,8 +102,9 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
 			return
 		}
-
-		proj, retCode, err := m.createProject(c, dto)
+		created_by := slug.Make(strings.ReplaceAll(c.GetString("user_id"), "@", "-at-"))
+		user_id := c.GetString("user_id")
+		proj, retCode, err := m.createProject(c, user_id, created_by, dto)
 		if err != nil {
 			c.JSON(retCode, gin.H{"error": err.Error()})
 			return
@@ -94,11 +115,11 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	})
 }
 
-func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1alpha1.Project, int, error) {
+func (m *Module) createProject(ctx context.Context, user_id string, created_by string, dto ProjectDto) (infrastructurev1alpha1.Project, int, error) {
 	slug.MaxLength = 63
 	name := slug.Make(dto.Name)
 
-	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, name, metav1.GetOptions{})
+	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if obj != nil {
 		// Project with this name already exists
 		return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("project with the same name already exists. Projects must have unique names within the platform")
@@ -118,7 +139,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 			Name: name,
 			Labels: map[string]string{
 				"edgecdnx.com/project-name": name,
-				"edgecdnx.com/created-by":   slug.Make(strings.ReplaceAll(c.GetString("user_id"), "@", "-at-")),
+				"edgecdnx.com/created-by":   created_by,
 			},
 		},
 		Spec: infrastructurev1alpha1.ProjectSpec{
@@ -128,7 +149,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 				Groups: []infrastructurev1alpha1.RuleSpec{
 					{
 						PType: "g",
-						V0:    c.GetString("user_id"),
+						V0:    user_id,
 						V1:    "admin",
 						V2:    name,
 					},
@@ -182,7 +203,7 @@ func (m *Module) createProject(c *gin.Context, dto ProjectDto) (infrastructurev1
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
 		Resource: "projects",
-	}).Namespace(ns).Create(c, &projectUnstructured, metav1.CreateOptions{})
+	}).Namespace(ns).Create(ctx, &projectUnstructured, metav1.CreateOptions{})
 
 	if err != nil {
 		if apierrors.IsBadRequest(err) {

@@ -1,15 +1,21 @@
 package projects
 
 import (
+	"context"
+	"strings"
+
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/casbin/casbin/v3"
 	"github.com/gin-gonic/gin"
+	"github.com/gosimple/slug"
 	"k8s.io/client-go/dynamic"
 )
 
 type Config struct {
-	Namespace string
+	Namespace           string
+	DefaultAdminProject string
+	DefaultAdminUser    string
 }
 
 type Module struct {
@@ -43,4 +49,26 @@ func (m *Module) SetMiddlewares(middlewares ...gin.HandlerFunc) {
 
 func (m *Module) SetEnforcer(enforcer *casbin.Enforcer) {
 	m.enforcer = enforcer
+}
+
+func (m *Module) EnsureAdmin() error {
+	// TODO handle updates
+	createProjectDto := ProjectDto{
+		Name:        m.cfg.DefaultAdminProject,
+		Description: "Admin project",
+	}
+
+	ctx := context.Background()
+
+	created_by := slug.Make(strings.ReplaceAll(m.cfg.DefaultAdminUser, "@", "-at-"))
+	_, code, err := m.createProject(ctx, m.cfg.DefaultAdminUser, created_by, createProjectDto)
+	if err != nil {
+		if code == 409 {
+			logger.L().Info("Admin project already exists, skipping creation")
+			return nil
+		}
+		return err
+	}
+
+	return nil
 }

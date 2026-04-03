@@ -45,12 +45,21 @@ e = some(where (p.eft == allow))
 m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && (keyMatch2(r.res, p.res)) && r.act == p.act
 `
 
+type OIDCGroupMapping struct {
+	OIDCGroup string
+	Tenant    string
+	Group     string
+}
+
 type Config struct {
 	oidc.Config
-	verifier       *oidc.IDTokenVerifier
-	authMiddleware gin.HandlerFunc
-	Namespace      string
-	AuthClaim      string
+	verifier          *oidc.IDTokenVerifier
+	authMiddleware    gin.HandlerFunc
+	Namespace         string
+	AuthClaim         string
+	GroupsClaim       string
+	OIDCGroupMappings []OIDCGroupMapping
+	OIDCGroupPrefix   string
 }
 
 type Module struct {
@@ -91,6 +100,15 @@ func (m *Module) AuthMiddleware() gin.HandlerFunc {
 		if err := idToken.Claims(&claims); err == nil {
 			c.Set("claims", claims)
 			c.Set("user_id", claims[m.cfg.AuthClaim])
+			// Convert groups claim array to comma-separated string. Seems like there's bug retreiving it as a slice directly from the context, maybe due to how Gin stores values.
+			if groups, ok := claims[m.cfg.GroupsClaim].([]interface{}); ok {
+				groupStrs := make([]string, len(groups))
+				for i, g := range groups {
+					groupStrs[i] = fmt.Sprintf("%s%s", m.cfg.OIDCGroupPrefix, g)
+				}
+				c.Set("groups", strings.Join(groupStrs, ","))
+			}
+
 		}
 
 		c.Next()
@@ -229,6 +247,24 @@ func (m *Module) Init() error {
 	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
 		logger.L().Error("Failed to sync informer cache")
 		return fmt.Errorf("failed to sync informer cache")
+	}
+
+	// Caches synced. Add OIDC mappings
+	logger.L().Info("Informer cache synced, loading OIDC policies")
+
+	for _, mapping := range m.cfg.OIDCGroupMappings {
+		logger.L().Info("Adding OIDC group mapping", zap.String("oidc_group", mapping.OIDCGroup), zap.String("tenant", mapping.Tenant), zap.String("group", mapping.Group))
+		m.Enforcer.AddGroupingPolicy(mapping.OIDCGroup, mapping.Group, mapping.Tenant)
+	}
+
+	pols, err := m.Enforcer.GetGroupingPolicy()
+	if err != nil {
+		logger.L().Error("Failed to get policies", zap.Error(err))
+		return fmt.Errorf("failed to get policies: %w", err)
+	}
+	logger.L().Debug("Current policies after sync:")
+	for _, p := range pols {
+		logger.L().Debug("Policy", zap.String("sub", p[0]), zap.String("dom", p[1]), zap.String("group", p[2]))
 	}
 
 	return nil
