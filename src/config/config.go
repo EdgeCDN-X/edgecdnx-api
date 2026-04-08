@@ -15,6 +15,7 @@ type AppConfig struct {
 	Production          bool
 	Listen              string
 	Namespace           string
+	PrometheusEndpoint  string
 	CorsAllowOrigins    []string
 	CorsAllowedMethods  []string
 	CorsAllowedHeaders  []string

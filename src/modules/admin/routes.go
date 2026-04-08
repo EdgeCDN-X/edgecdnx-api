@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"net/http"
+
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
@@ -82,5 +84,26 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			items = append(items, *l)
 		}
 		c.JSON(200, items)
+	})
+
+	group.GET("/location-healths", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
+		if m.prometheus == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "prometheus client is not configured"})
+			return
+		}
+
+		response, err := m.prometheus.Query(c.Request.Context(), `probe_success{endpoint="location"}`)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to query prometheus: " + err.Error()})
+			return
+		}
+
+		healthResponse, err := m.buildLocationHealthResponse(c.Request.Context(), response)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build location health response: " + err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, healthResponse)
 	})
 }

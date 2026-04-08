@@ -22,30 +22,51 @@ type Module interface {
 	Shutdown()
 }
 
+type PrometheusAware interface {
+	SetPrometheus(prometheus *Prometheus)
+}
+
 type ModuleBase struct {
 	Module
 	Name string
 }
 
-type App struct {
-	Engine  *gin.Engine
-	Modules []ModuleBase
+type Config struct {
+	Production         bool
+	PrometheusEndpoint string
 }
 
-func New(production bool) *App {
-	if production {
+type App struct {
+	Engine     *gin.Engine
+	Modules    []ModuleBase
+	Prometheus *Prometheus
+}
+
+func New(cfg Config) (*App, error) {
+	if cfg.Production {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	g := gin.Default()
 
-	return &App{
-		Engine:  g,
-		Modules: []ModuleBase{},
+	prometheusClient, err := NewPrometheus(PrometheusConfig{
+		Endpoint: cfg.PrometheusEndpoint,
+	})
+	if err != nil {
+		return nil, err
 	}
+
+	return &App{
+		Engine:     g,
+		Modules:    []ModuleBase{},
+		Prometheus: prometheusClient,
+	}, nil
 }
 
 func (a *App) RegisterModule(m Module, name string) error {
 	a.Modules = append(a.Modules, ModuleBase{Module: m, Name: name})
+	if promAware, ok := m.(PrometheusAware); ok {
+		promAware.SetPrometheus(a.Prometheus)
+	}
 	err := m.Init()
 	if err != nil {
 		return err

@@ -18,8 +18,9 @@ type Config struct {
 
 type Module struct {
 	cfg         Config
-	dynClient   *dynamic.DynamicClient
+	dynClient   dynamic.Interface
 	client      *kubernetes.Clientset
+	prometheus  *app.Prometheus
 	middlewares []gin.HandlerFunc
 	enforcer    *casbin.Enforcer
 }
@@ -54,4 +55,8 @@ func (m *Module) SetMiddlewares(middlewares ...gin.HandlerFunc) {
 
 func (m *Module) SetEnforcer(enforcer *casbin.Enforcer) {
 	m.enforcer = enforcer
+}
+
+func (m *Module) SetPrometheus(prometheus *app.Prometheus) {
+	m.prometheus = prometheus
 }

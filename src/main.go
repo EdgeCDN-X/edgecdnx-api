@@ -19,6 +19,7 @@ func main() {
 	production := flag.Bool("production", false, "run in production mode")
 	listen := flag.String("listen", ":5555", "Address and port to listen at")
 	namespace := flag.String("namespace", "edgecdnx", "Kubernetes namespace to watch for resources")
+	prometheus_endpoint := flag.String("prometheus_endpoint", "", "Prometheus HTTP endpoint, for example http://prometheus:9090")
 	auth_user_claim := flag.String("auth_user_claim", "email", "OIDC claim to use as the user identifier")
 	auth_groups_claim := flag.String("auth_groups_claim", "groups", "OIDC claim to use for user groups")
 	cors_allow_origins := flag.String("cors_allow_origins", "*", "Comma-separated list of allowed CORS origins")
@@ -36,6 +37,7 @@ func main() {
 		Production:          *production,
 		Listen:              *listen,
 		Namespace:           *namespace,
+		PrometheusEndpoint:  *prometheus_endpoint,
 		CorsAllowOrigins:    strings.Split(*cors_allow_origins, ","),
 		CorsAllowedMethods:  strings.Split(*cors_allowed_methods, ","),
 		CorsAllowedHeaders:  strings.Split(*cors_allowed_headers, ","),
@@ -47,7 +49,14 @@ func main() {
 	}
 
 	logger.Init(appcfg.Production)
-	a := app.New(appcfg.Production)
+	a, err := app.New(app.Config{
+		Production:         appcfg.Production,
+		PrometheusEndpoint: appcfg.PrometheusEndpoint,
+	})
+	if err != nil {
+		logger.L().Error("App initialization failed", zap.Error(err))
+		panic("app initialization failed")
+	}
 
 	a.Engine.Use(cors.New(cors.Config{
 		AllowOrigins:     appcfg.CorsAllowOrigins,
@@ -65,7 +74,7 @@ func main() {
 		OIDCGroupMappings: appcfg.OIDCGroupMappings,
 	})
 
-	err := a.RegisterModule(authModule, "Auth")
+	err = a.RegisterModule(authModule, "Auth")
 	if err != nil {
 		logger.L().Error("Module registration failed", zap.Error(err))
 		panic("auth module registration failed")
