@@ -98,7 +98,13 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			return
 		}
 
-		healthResponse, err := m.buildLocationHealthResponse(c.Request.Context(), response)
+		alertResponse, err := m.prometheus.Query(c.Request.Context(), `ALERTS{alertstate="firing"}`)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to query prometheus alerts: " + err.Error()})
+			return
+		}
+
+		healthResponse, err := m.buildLocationHealthResponse(c.Request.Context(), response, alertResponse)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build location health response: " + err.Error()})
 			return

@@ -72,7 +72,7 @@ func TestBuildLocationHealthDataMatchesLocationsNodesAndSources(t *testing.T) {
 			},
 			Status: infrastructurev1alpha1.LocationStatus{Status: "Degraded"},
 		},
-	}, "vector", queryResult)
+	}, "vector", queryResult, nil)
 
 	if response.Status != "" {
 		t.Fatalf("expected empty status before envelope assignment, got %q", response.Status)
@@ -118,6 +118,115 @@ func TestBuildLocationHealthDataMatchesLocationsNodesAndSources(t *testing.T) {
 	}
 	if response.Data.UnmatchedMetrics[0].Source != "fra1-ns1" {
 		t.Fatalf("unexpected unmatched source %q", response.Data.UnmatchedMetrics[0].Source)
+	}
+}
+
+func TestBuildLocationHealthDataMarksNodeUnhealthyForFiringAlert(t *testing.T) {
+	queryResult := []prometheusVectorSample{
+		{
+			Metric: map[string]string{
+				"cluster":  "fra1-ns1",
+				"endpoint": "location",
+				"instance": "http://74.220.24.46/healthz",
+				"location": "nyc1-c1",
+				"role":     "routing",
+			},
+			Value: mustRawMessages(t, `1775650533.969`, `"1"`),
+		},
+	}
+	alertResult := []prometheusVectorSample{
+		{
+			Metric: map[string]string{
+				"alertname":  "PrometheusOutOfOrderTimestamps",
+				"alertstate": "firing",
+				"cluster":    "nyc1-c1",
+			},
+			Value: mustRawMessages(t, `1775650535.0`, `"1"`),
+		},
+	}
+
+	response := buildLocationHealthData([]infrastructurev1alpha1.Location{
+		{
+			ObjectMeta: mustObjectMeta("nyc1-c1"),
+			Spec: infrastructurev1alpha1.LocationSpec{
+				NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{{
+					Name: "ssd",
+					Nodes: []infrastructurev1alpha1.NodeSpec{{
+						Name: "n1",
+						Ipv4: "74.220.24.46",
+						Alerts: []infrastructurev1alpha1.PrometheusAlertMatcherSpec{{
+							AlertName: "PrometheusOutOfOrderTimestamps",
+							Labels: map[string]string{
+								"cluster": "nyc1-c1",
+							},
+						}},
+					}},
+				}},
+			},
+		},
+	}, "vector", queryResult, alertResult)
+
+	if len(response.Data.Locations) != 1 {
+		t.Fatalf("expected 1 location, got %d", len(response.Data.Locations))
+	}
+
+	node := response.Data.Locations[0].Sources[0].Nodes[0]
+	if node.Healthy {
+		t.Fatal("expected node to be unhealthy when alert is firing")
+	}
+	if len(node.Alerts) != 1 {
+		t.Fatalf("expected 1 node alert, got %d", len(node.Alerts))
+	}
+	if response.Data.Locations[0].Sources[0].UnhealthyNodes != 1 {
+		t.Fatalf("expected 1 unhealthy node, got %d", response.Data.Locations[0].Sources[0].UnhealthyNodes)
+	}
+}
+
+func TestBuildLocationHealthDataIncludesLocationScopedAlerts(t *testing.T) {
+	alertResult := []prometheusVectorSample{
+		{
+			Metric: map[string]string{
+				"alertname":  "LocationClusterDown",
+				"alertstate": "firing",
+				"cluster":    "fra1-c1",
+			},
+			Value: mustRawMessages(t, `1775650535.0`, `"1"`),
+		},
+	}
+
+	response := buildLocationHealthData([]infrastructurev1alpha1.Location{
+		{
+			ObjectMeta: mustObjectMeta("fra1-c1"),
+			Spec: infrastructurev1alpha1.LocationSpec{
+				Alerts: []infrastructurev1alpha1.PrometheusAlertMatcherSpec{{
+					AlertName: "LocationClusterDown",
+					Labels: map[string]string{
+						"cluster": "fra1-c1",
+					},
+				}},
+			},
+		},
+	}, "vector", nil, alertResult)
+
+	if len(response.Data.Locations) != 1 {
+		t.Fatalf("expected 1 location, got %d", len(response.Data.Locations))
+	}
+
+	location := response.Data.Locations[0]
+	if len(location.Alerts) != 1 {
+		t.Fatalf("expected 1 location alert, got %d", len(location.Alerts))
+	}
+	if len(location.Sources) != 1 {
+		t.Fatalf("expected 1 synthetic alert source, got %d", len(location.Sources))
+	}
+	if location.Sources[0].Source != locationHealthAlertSource {
+		t.Fatalf("unexpected source %q", location.Sources[0].Source)
+	}
+	if location.Sources[0].UnhealthyNodes != 1 {
+		t.Fatalf("expected 1 unhealthy synthetic alert target, got %d", location.Sources[0].UnhealthyNodes)
+	}
+	if location.Sources[0].Nodes[0].AlertScope != "location" {
+		t.Fatalf("unexpected alert scope %q", location.Sources[0].Nodes[0].AlertScope)
 	}
 }
 

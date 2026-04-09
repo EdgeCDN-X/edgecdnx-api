@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
@@ -90,17 +91,24 @@ func TestLocationHealthWithoutPrometheus(t *testing.T) {
 
 func TestLocationHealthQueriesPrometheus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	queries := []string{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/query" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("query"); got != `probe_success{endpoint="location"}` {
+		queries = append(queries, r.URL.Query().Get("query"))
+
+		switch got := r.URL.Query().Get("query"); got {
+		case `probe_success{endpoint="location"}`:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"cluster":"fra1-ns1","endpoint":"location","instance":"http://74.220.24.46/healthz","location":"nyc1-c1","role":"routing"},"value":[1775650533.969,"1"]}]}}`))
+		case `ALERTS{alertstate="firing"}`:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"alertname":"PrometheusOutOfOrderTimestamps","alertstate":"firing","cluster":"nyc1-c1"},"value":[1775650535.0,"1"]}]}}`))
+		default:
 			t.Fatalf("unexpected query %q", got)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"cluster":"fra1-ns1","endpoint":"location","instance":"http://74.220.24.46/healthz","location":"nyc1-c1","role":"routing"},"value":[1775650533.969,"1"]}]}}`))
 	}))
 	defer server.Close()
 
@@ -112,7 +120,16 @@ func TestLocationHealthQueriesPrometheus(t *testing.T) {
 	module := newTestModule(t, prometheus, &infrastructurev1alpha1.Location{
 		ObjectMeta: metav1.ObjectMeta{Name: "nyc1-c1", Namespace: "edgecdnx"},
 		Spec: infrastructurev1alpha1.LocationSpec{
-			Nodes: []infrastructurev1alpha1.NodeSpec{{Name: "nyc-router-1", Ipv4: "74.220.24.46"}},
+			Nodes: []infrastructurev1alpha1.NodeSpec{{
+				Name: "nyc-router-1",
+				Ipv4: "74.220.24.46",
+				Alerts: []infrastructurev1alpha1.PrometheusAlertMatcherSpec{{
+					AlertName: "PrometheusOutOfOrderTimestamps",
+					Labels: map[string]string{
+						"cluster": "nyc1-c1",
+					},
+				}},
+			}},
 		},
 	})
 	router := gin.New()
@@ -144,6 +161,12 @@ func TestLocationHealthQueriesPrometheus(t *testing.T) {
 	}
 	if response.Data.Locations[0].Sources[0].Nodes[0].NodeName != "nyc-router-1" {
 		t.Fatalf("unexpected node name %q", response.Data.Locations[0].Sources[0].Nodes[0].NodeName)
+	}
+	if response.Data.Locations[0].Sources[0].Nodes[0].Healthy {
+		t.Fatal("expected node to be marked unhealthy when a configured alert is firing")
+	}
+	if !slices.Equal(queries, []string{`probe_success{endpoint="location"}`, `ALERTS{alertstate="firing"}`}) {
+		t.Fatalf("unexpected query sequence %#v", queries)
 	}
 	if len(response.Data.UnmatchedMetrics) != 0 {
 		t.Fatalf("expected no unmatched metrics, got %d", len(response.Data.UnmatchedMetrics))
