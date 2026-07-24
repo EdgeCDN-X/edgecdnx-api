@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
@@ -173,6 +174,16 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 				Waf: infrastructurev1alpha1.WafSpec{
 					Enabled: dto.WafEnabled,
 				},
+				Cors: func() infrastructurev1alpha1.CorsSpec {
+					if dto.Cors != nil {
+						return infrastructurev1alpha1.CorsSpec{
+							AllowMethods:     strings.Join(dto.Cors.AllowedMethods, ","),
+							AllowCredentials: dto.Cors.AllowCredentails,
+							AllowOrigin:      strings.Join(dto.Cors.AllowedOrigins, ","),
+						}
+					}
+					return infrastructurev1alpha1.CorsSpec{}
+				}(),
 			},
 		}
 
@@ -304,6 +315,14 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			service.Spec.Path = infrastructurev1alpha1.PathSpec{
 				Paths:   dto.Path.Paths,
 				Rewrite: dto.Path.Rewrite,
+			}
+		}
+
+		if dto.Cors != nil {
+			service.Spec.Cors = infrastructurev1alpha1.CorsSpec{
+				AllowMethods:     strings.Join(dto.Cors.AllowedMethods, ","),
+				AllowCredentials: dto.Cors.AllowCredentails,
+				AllowOrigin:      strings.Join(dto.Cors.AllowedOrigins, ","),
 			}
 		}
 
