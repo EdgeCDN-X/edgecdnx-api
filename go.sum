@@ -1,5 +1,5 @@
-github.com/EdgeCDN-X/edgecdnx-controller v0.27.1 h1:qieOJbC3iyhw2lQPHlPMu7zmXioIj/vSHthyRMj9a+w=
-github.com/EdgeCDN-X/edgecdnx-controller v0.27.1/go.mod h1:HDsRz/OBRz2Zt/D80aM55kFbDZp/8zinQon/Wdj/sGc=
+github.com/EdgeCDN-X/edgecdnx-controller v0.28.0 h1:aHattfs7ToPS7JMEvdrAqPoyNHvM99GoxIf2/AEz1BY=
+github.com/EdgeCDN-X/edgecdnx-controller v0.28.0/go.mod h1:HDsRz/OBRz2Zt/D80aM55kFbDZp/8zinQon/Wdj/sGc=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
