@@ -106,6 +106,13 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 				Name:       dto.Name,
 				Domain:     fmt.Sprintf("%s.%s", generatedDomainHost, m.cfg.ServiceBaseDomain),
 				OriginType: dto.OriginType,
+				RouteSelector: func() *metav1.LabelSelector {
+					if m.cfg.DefaultRouteSelector == nil {
+						return nil
+					}
+					selector := m.cfg.DefaultRouteSelector.DeepCopy()
+					return selector
+				}(),
 				StaticOrigins: func() []infrastructurev1alpha1.StaticOriginSpec {
 					if dto.OriginType == "static" {
 						return []infrastructurev1alpha1.StaticOriginSpec{

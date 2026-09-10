@@ -5,12 +5,14 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/casbin/casbin/v3"
 	"github.com/gin-gonic/gin"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 )
 
 type Config struct {
-	Namespace         string
-	ServiceBaseDomain string
+	Namespace            string
+	ServiceBaseDomain    string
+	DefaultRouteSelector *metav1.LabelSelector
 }
 
 type Module struct {

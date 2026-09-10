@@ -1,6 +1,8 @@
 package zones
 
 import (
+	"errors"
+
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
@@ -17,8 +19,23 @@ var gvr = schema.GroupVersionResource{
 	Resource: "zones",
 }
 
+func writeAPIStatusError(c *gin.Context, err error) bool {
+	var statusErr *apierrors.StatusError
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+
+	c.JSON(int(statusErr.ErrStatus.Code), gin.H{
+		"error":   statusErr.ErrStatus.Message,
+		"reason":  statusErr.ErrStatus.Reason,
+		"details": statusErr.ErrStatus.Details,
+	})
+	return true
+}
+
 func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/zones", m.middlewares...)
+	m.registerDNSEndpointRoutes(group)
 
 	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
@@ -88,6 +105,10 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 		createdObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Create(c, &unstructured.Unstructured{Object: objMap}, metav1.CreateOptions{})
 		if err != nil {
+			if writeAPIStatusError(c, err) {
+				return
+			}
+
 			c.JSON(500, gin.H{"error": "failed to create zone: " + err.Error()})
 			return
 		}
@@ -105,12 +126,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group.DELETE("/:zone-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("delete").Build(), func(c *gin.Context) {
 		err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Delete(c, c.Param("zone-id"), metav1.DeleteOptions{})
 		if err != nil {
-			if statusErr, ok := err.(*apierrors.StatusError); ok {
-				c.JSON(int(statusErr.ErrStatus.Code), gin.H{
-					"error":   statusErr.ErrStatus.Message,
-					"reason":  statusErr.ErrStatus.Reason,
-					"details": statusErr.ErrStatus.Details,
-				})
+			if writeAPIStatusError(c, err) {
 				return
 			}
 
@@ -121,4 +137,5 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.Status(204)
 		return
 	})
+
 }

@@ -28,24 +28,31 @@ func main() {
 	service_base_domain := flag.String("service_base_domain", "democdn.edgecdnx.com", "Base domain for services")
 	default_admin_project := flag.String("default_admin_project", "admin", "Name of the default admin project to create if it doesn't exist")
 	default_admin_user := flag.String("default_admin_user", "admin@edgecdnx.com", "Email of the default admin user to create if it doesn't exist")
+	default_route_selector := flag.String("default_route_selector", "{\"matchLabels\":{\"edgecdnx.com/tenant\":\"global\"}}", "JSON-encoded Kubernetes label selector applied to all newly created services, e.g. '{\"matchLabels\":{\"edgecdnx.com/route-kind\":\"static\"}}'")
 	oidc_group_mappings := flag.String("oidc_group_mappings", "admin:admin:admin", "Comma-separated list of OIDC group to role mappings in the format oidc-group:tenant:group")
 	oidc_group_prefix := flag.String("oidc_group_prefix", "oidc-", "Prefix to add to OIDC groups when creating Casbin policies")
 
 	flag.Parse()
 
+	defaultRouteSelector, err := config.ParseDefaultRouteSelector(*default_route_selector)
+	if err != nil {
+		panic("invalid default_route_selector: " + err.Error())
+	}
+
 	appcfg := config.AppConfig{
-		Production:          *production,
-		Listen:              *listen,
-		Namespace:           *namespace,
-		PrometheusEndpoint:  *prometheus_endpoint,
-		CorsAllowOrigins:    strings.Split(*cors_allow_origins, ","),
-		CorsAllowedMethods:  strings.Split(*cors_allowed_methods, ","),
-		CorsAllowedHeaders:  strings.Split(*cors_allowed_headers, ","),
-		ServiceBaseDomain:   *service_base_domain,
-		DefaultAdminProject: *default_admin_project,
-		DefaultAdminUser:    *default_admin_user,
-		OIDCGroupMappings:   config.ParseOIDCGroupMappings(*oidc_group_mappings, *oidc_group_prefix),
-		OIDCGroupPrefix:     *oidc_group_prefix,
+		Production:           *production,
+		Listen:               *listen,
+		Namespace:            *namespace,
+		PrometheusEndpoint:   *prometheus_endpoint,
+		CorsAllowOrigins:     strings.Split(*cors_allow_origins, ","),
+		CorsAllowedMethods:   strings.Split(*cors_allowed_methods, ","),
+		CorsAllowedHeaders:   strings.Split(*cors_allowed_headers, ","),
+		ServiceBaseDomain:    *service_base_domain,
+		DefaultRouteSelector: defaultRouteSelector,
+		DefaultAdminProject:  *default_admin_project,
+		DefaultAdminUser:     *default_admin_user,
+		OIDCGroupMappings:    config.ParseOIDCGroupMappings(*oidc_group_mappings, *oidc_group_prefix),
+		OIDCGroupPrefix:      *oidc_group_prefix,
 	}
 
 	logger.Init(appcfg.Production)

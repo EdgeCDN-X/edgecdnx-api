@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/admin"
@@ -9,21 +10,35 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/zones"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type AppConfig struct {
-	Production          bool
-	Listen              string
-	Namespace           string
-	PrometheusEndpoint  string
-	CorsAllowOrigins    []string
-	CorsAllowedMethods  []string
-	CorsAllowedHeaders  []string
-	ServiceBaseDomain   string
-	DefaultAdminProject string
-	DefaultAdminUser    string
-	OIDCGroupMappings   []auth.OIDCGroupMapping
-	OIDCGroupPrefix     string
+	Production           bool
+	Listen               string
+	Namespace            string
+	PrometheusEndpoint   string
+	CorsAllowOrigins     []string
+	CorsAllowedMethods   []string
+	CorsAllowedHeaders   []string
+	ServiceBaseDomain    string
+	DefaultRouteSelector *metav1.LabelSelector
+	DefaultAdminProject  string
+	DefaultAdminUser     string
+	OIDCGroupMappings    []auth.OIDCGroupMapping
+	OIDCGroupPrefix      string
+}
+
+func ParseDefaultRouteSelector(s string) (*metav1.LabelSelector, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+
+	selector := &metav1.LabelSelector{}
+	if err := json.Unmarshal([]byte(s), selector); err != nil {
+		return nil, err
+	}
+	return selector, nil
 }
 
 func ParseOIDCGroupMappings(s string, prefix string) []auth.OIDCGroupMapping {
@@ -87,8 +102,9 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Name: "Services",
 			Init: func() app.Module {
 				return services.New(services.Config{
-					Namespace:         a.Namespace,
-					ServiceBaseDomain: a.ServiceBaseDomain,
+					Namespace:            a.Namespace,
+					ServiceBaseDomain:    a.ServiceBaseDomain,
+					DefaultRouteSelector: a.DefaultRouteSelector,
 				})
 			},
 		},
