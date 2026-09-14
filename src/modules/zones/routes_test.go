@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
@@ -208,6 +209,10 @@ func TestCreateDNSEndpointValidation(t *testing.T) {
 			name: "DNS name outside zone",
 			body: `{"dnsName":"www.other.example","recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`,
 		},
+		{
+			name: "SRV target is an IP address",
+			body: `{"dnsName":"_sip._udp.example.com","recordTTL":300,"recordType":"SRV","targets":["10 0 5060 192.0.2.1"]}`,
+		},
 	}
 
 	for _, test := range tests {
@@ -217,5 +222,33 @@ func TestCreateDNSEndpointValidation(t *testing.T) {
 				t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreateSRVDNSEndpointWithServiceLabels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	module := newDNSEndpointTestModule(t)
+	router := gin.New()
+	module.RegisterRoutes(router)
+
+	response := performJSONRequest(router, http.MethodPost, "/project/project-a/zones/example.com/dns-endpoints", `{
+		"dnsName":"_sip._udp.example.com",
+		"recordTTL":300,
+		"recordType":"SRV",
+		"targets":["10 0 5060 sip.example.com."]
+	}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
+	}
+
+	var created infrastructurev1alpha1.DNSEndpoint
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created DNS endpoint: %v", err)
+	}
+	if created.Spec.DNSName != "_sip._udp.example.com" {
+		t.Fatalf("expected SRV owner name to be preserved, got %q", created.Spec.DNSName)
+	}
+	if strings.Contains(created.Name, "_") {
+		t.Fatalf("expected Kubernetes-safe resource name, got %q", created.Name)
 	}
 }

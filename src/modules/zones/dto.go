@@ -10,7 +10,7 @@ type UpdateZoneDto struct {
 }
 
 type CreateDNSEndpointDto struct {
-	DNSName       string   `json:"dnsName" binding:"required,fqdn"`
+	DNSName       string   `json:"dnsName" binding:"required"`
 	RoutingPolicy string   `json:"routingPolicy,omitempty" binding:"omitempty,eq=Simple"`
 	RecordTTL     int      `json:"recordTTL" binding:"required,min=1"`
 	RecordType    string   `json:"recordType" binding:"required,oneof=A AAAA CNAME TXT MX SRV NS"`
@@ -18,7 +18,7 @@ type CreateDNSEndpointDto struct {
 }
 
 type UpdateDNSEndpointDto struct {
-	DNSName       string   `json:"dnsName,omitempty" binding:"omitempty,fqdn"`
+	DNSName       string   `json:"dnsName,omitempty" binding:"omitempty"`
 	RoutingPolicy string   `json:"routingPolicy,omitempty" binding:"omitempty,eq=Simple"`
 	RecordTTL     *int     `json:"recordTTL,omitempty" binding:"omitempty,min=1"`
 	RecordType    string   `json:"recordType,omitempty" binding:"omitempty,oneof=A AAAA CNAME TXT MX SRV NS"`

@@ -3,6 +3,7 @@ package zones
 import (
 	"crypto/sha256"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -81,6 +82,14 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 		var dto CreateDNSEndpointDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+		if !validDNSEndpointDNSName(dto.DNSName, dto.RecordType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid DNS name %q for %s record", dto.DNSName, dto.RecordType)})
+			return
+		}
+		if !validDNSEndpointTargets(dto.RecordType, dto.Targets) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid targets for %s record", dto.RecordType)})
 			return
 		}
 
@@ -178,6 +187,14 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 
 		if !dnsNameBelongsToZone(dnsEndpoint.Spec.DNSName, zone.Spec.Zone) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("dnsName %q is outside zone %q", dnsEndpoint.Spec.DNSName, zone.Spec.Zone)})
+			return
+		}
+		if !validDNSEndpointDNSName(dnsEndpoint.Spec.DNSName, dnsEndpoint.Spec.RecordType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid DNS name %q for %s record", dnsEndpoint.Spec.DNSName, dnsEndpoint.Spec.RecordType)})
+			return
+		}
+		if !validDNSEndpointTargets(dnsEndpoint.Spec.RecordType, dnsEndpoint.Spec.Targets) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid targets for %s record", dnsEndpoint.Spec.RecordType)})
 			return
 		}
 
@@ -339,6 +356,10 @@ func dnsNameBelongsToZone(dnsName, zoneName string) bool {
 
 func dnsEndpointResourceName(dnsName, recordType string) string {
 	name := strings.TrimSuffix(strings.ToLower(dnsName), ".") + "-" + strings.ToLower(recordType)
+	if !validKubernetesDNSSubdomain(name) {
+		digest := sha256.Sum256([]byte(name))
+		return fmt.Sprintf("dnsendpoint-%x", digest[:12])
+	}
 	if len(name) <= 253 {
 		return name
 	}
@@ -347,4 +368,82 @@ func dnsEndpointResourceName(dnsName, recordType string) string {
 	suffix := fmt.Sprintf("-%x", digest[:6])
 	prefix := strings.TrimRight(name[:253-len(suffix)], ".-")
 	return prefix + suffix
+}
+
+func validDNSEndpointDNSName(dnsName, recordType string) bool {
+	name := strings.TrimSuffix(dnsName, ".")
+	if name == "" || len(name) > 253 {
+		return false
+	}
+
+	labels := strings.Split(name, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if !validDNSLabel(label, recordType == "SRV") {
+			return false
+		}
+	}
+	return true
+}
+
+func validDNSEndpointTargets(recordType string, targets []string) bool {
+	if recordType != "SRV" {
+		return true
+	}
+	for _, target := range targets {
+		fields := strings.Fields(target)
+		if len(fields) != 4 || !validDNSHostname(fields[3]) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDNSHostname(name string) bool {
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || len(name) > 253 || net.ParseIP(name) != nil {
+		return false
+	}
+
+	labels := strings.Split(name, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if !validDNSLabel(label, false) {
+			return false
+		}
+	}
+	return true
+}
+
+func validKubernetesDNSSubdomain(name string) bool {
+	if name == "" || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if !validDNSLabel(label, false) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDNSLabel(label string, allowUnderscore bool) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+	for index, character := range []byte(label) {
+		isAlphaNumeric := character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'
+		isUnderscore := allowUnderscore && character == '_'
+		if !isAlphaNumeric && character != '-' && !isUnderscore {
+			return false
+		}
+		if (index == 0 || index == len(label)-1) && !isAlphaNumeric && !isUnderscore {
+			return false
+		}
+	}
+	return true
 }
