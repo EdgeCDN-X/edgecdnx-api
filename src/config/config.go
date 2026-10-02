@@ -7,6 +7,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/admin"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/locations"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/zones"
@@ -105,6 +106,14 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 					Namespace:            a.Namespace,
 					ServiceBaseDomain:    a.ServiceBaseDomain,
 					DefaultRouteSelector: a.DefaultRouteSelector,
+				})
+			},
+		},
+		{
+			Name: "Locations",
+			Init: func() app.Module {
+				return locations.New(locations.Config{
+					Namespace: a.Namespace,
 				})
 			},
 		},
