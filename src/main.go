@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"os"
 	"strings"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/config"
@@ -20,6 +21,7 @@ func main() {
 	listen := flag.String("listen", ":5555", "Address and port to listen at")
 	namespace := flag.String("namespace", "edgecdnx", "Kubernetes namespace to watch for resources")
 	prometheus_endpoint := flag.String("prometheus_endpoint", "", "Prometheus HTTP endpoint, for example http://prometheus:9090")
+	healthcheck_db_dsn := flag.String("healthcheck_db_dsn", os.Getenv("HEALTHCHECK_DB_DSN"), "PostgreSQL/TimescaleDB connection string for healthcheck results, e.g. postgres://user:pass@host:5432/app?sslmode=disable (defaults to $HEALTHCHECK_DB_DSN)")
 	auth_user_claim := flag.String("auth_user_claim", "email", "OIDC claim to use as the user identifier")
 	auth_groups_claim := flag.String("auth_groups_claim", "groups", "OIDC claim to use for user groups")
 	cors_allow_origins := flag.String("cors_allow_origins", "*", "Comma-separated list of allowed CORS origins")
@@ -59,6 +61,7 @@ func main() {
 	a, err := app.New(app.Config{
 		Production:         appcfg.Production,
 		PrometheusEndpoint: appcfg.PrometheusEndpoint,
+		HealthcheckDBDSN:   *healthcheck_db_dsn,
 	})
 	if err != nil {
 		logger.L().Error("App initialization failed", zap.Error(err))

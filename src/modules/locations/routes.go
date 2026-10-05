@@ -26,6 +26,7 @@ var locationGVR = schema.GroupVersionResource{
 }
 
 func (m *Module) RegisterRoutes(r *gin.Engine) {
+	m.registerHealthCheckProfileRoutes(r)
 	group := r.Group("project/:project-id/locations", m.middlewares...)
 	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
 		objects, err := m.client.Resource(locationGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
@@ -54,6 +55,8 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		}
 		writeLocationResponse(c, http.StatusOK, object)
 	})
+
+	group.GET("/:location-id/healthchecks", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), m.getLocationHealthchecks)
 
 	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("create").Build(), func(c *gin.Context) {
 		var dto CreateLocationDto

@@ -13,10 +13,11 @@ type Config struct {
 }
 
 type Module struct {
-	cfg         Config
-	client      dynamic.Interface
-	middlewares []gin.HandlerFunc
-	enforcer    *casbin.Enforcer
+	cfg          Config
+	client       dynamic.Interface
+	healthchecks app.HealthcheckReader
+	middlewares  []gin.HandlerFunc
+	enforcer     *casbin.Enforcer
 }
 
 func New(cfg Config) *Module {

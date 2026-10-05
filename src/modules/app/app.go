@@ -34,12 +34,14 @@ type ModuleBase struct {
 type Config struct {
 	Production         bool
 	PrometheusEndpoint string
+	HealthcheckDBDSN   string
 }
 
 type App struct {
-	Engine     *gin.Engine
-	Modules    []ModuleBase
-	Prometheus *Prometheus
+	Engine        *gin.Engine
+	Modules       []ModuleBase
+	Prometheus    *Prometheus
+	HealthcheckDB *HealthcheckDB
 }
 
 func New(cfg Config) (*App, error) {
@@ -55,10 +57,24 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 
+	healthcheckDB, err := NewHealthcheckDB(context.Background(), HealthcheckDBConfig{DSN: cfg.HealthcheckDBDSN})
+	if err != nil {
+		return nil, err
+	}
+	if healthcheckDB == nil {
+		logger.L().Warn("Healthcheck database DSN not set; live healthcheck endpoints are disabled")
+	} else if err := healthcheckDB.Ping(context.Background()); err != nil {
+		// The pool reconnects lazily, so a temporarily unavailable database must not block the API from starting.
+		logger.L().Error("Healthcheck database is not reachable", zap.Error(err))
+	} else {
+		logger.L().Info("Connected to healthcheck database")
+	}
+
 	return &App{
-		Engine:     g,
-		Modules:    []ModuleBase{},
-		Prometheus: prometheusClient,
+		Engine:        g,
+		Modules:       []ModuleBase{},
+		Prometheus:    prometheusClient,
+		HealthcheckDB: healthcheckDB,
 	}, nil
 }
 
@@ -66,6 +82,9 @@ func (a *App) RegisterModule(m Module, name string) error {
 	a.Modules = append(a.Modules, ModuleBase{Module: m, Name: name})
 	if promAware, ok := m.(PrometheusAware); ok {
 		promAware.SetPrometheus(a.Prometheus)
+	}
+	if dbAware, ok := m.(HealthcheckDBAware); ok && a.HealthcheckDB != nil {
+		dbAware.SetHealthcheckDB(a.HealthcheckDB)
 	}
 	err := m.Init()
 	if err != nil {
@@ -122,6 +141,7 @@ func (a *App) Run(addr string) error {
 	for _, m := range a.Modules {
 		m.Shutdown()
 	}
+	a.HealthcheckDB.Close()
 
 	return nil
 }
