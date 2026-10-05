@@ -4,6 +4,7 @@ import infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1al
 
 type CreateLocationDto struct {
 	Name              string                                 `json:"name" binding:"required"`
+	Labels            map[string]string                      `json:"labels,omitempty"`
 	NodeGroups        []infrastructurev1alpha1.NodeGroupSpec `json:"nodeGroups,omitempty"`
 	GeoLookup         infrastructurev1alpha1.GeoLookupSpec   `json:"geoLookup,omitempty"`
 	Weight            int32                                  `json:"weight,omitempty"`
@@ -11,6 +12,7 @@ type CreateLocationDto struct {
 }
 
 type UpdateLocationDto struct {
+	Labels            *map[string]string                      `json:"labels,omitempty"`
 	NodeGroups        *[]infrastructurev1alpha1.NodeGroupSpec `json:"nodeGroups,omitempty"`
 	GeoLookup         *infrastructurev1alpha1.GeoLookupSpec   `json:"geoLookup,omitempty"`
 	Weight            *int32                                  `json:"weight,omitempty"`

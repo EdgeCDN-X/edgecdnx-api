@@ -65,6 +65,11 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid location name", "details": problems})
 			return
 		}
+		locationLabels, err := mergeLocationLabels(dto.Labels, c.Param("project-id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		location := &infrastructurev1alpha1.Location{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(),
@@ -72,7 +77,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name: dto.Name, Namespace: m.cfg.Namespace,
-				Labels: map[string]string{locationTenantLabel: c.Param("project-id")},
+				Labels: locationLabels,
 			},
 			Spec: infrastructurev1alpha1.LocationSpec{
 				NodeGroups: dto.NodeGroups, GeoLookup: dto.GeoLookup,
@@ -133,6 +138,14 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			return
 		}
 		object.Object["spec"] = spec
+		if dto.Labels != nil {
+			locationLabels, err := mergeLocationLabels(*dto.Labels, c.Param("project-id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			object.SetLabels(locationLabels)
+		}
 		updated, err := m.client.Resource(locationGVR).Namespace(m.cfg.Namespace).Update(c, object, metav1.UpdateOptions{})
 		if err != nil {
 			writeLocationError(c, "update", err)
@@ -184,6 +197,27 @@ func writeLocationError(c *gin.Context, operation string, err error) {
 	if !writeAPIStatusError(c, err) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to " + operation + " location: " + err.Error()})
 	}
+}
+
+func mergeLocationLabels(requested map[string]string, projectID string) (map[string]string, error) {
+	if problems := validation.IsValidLabelValue(projectID); len(problems) > 0 {
+		return nil, fmt.Errorf("invalid project ID for tenant label: %v", problems)
+	}
+	merged := make(map[string]string, len(requested)+1)
+	for key, value := range requested {
+		if key == locationTenantLabel {
+			if value != projectID {
+				return nil, fmt.Errorf("label %s is managed automatically and cannot be changed", locationTenantLabel)
+			}
+			continue
+		}
+		if len(validation.IsQualifiedName(key)) > 0 || len(validation.IsValidLabelValue(value)) > 0 {
+			return nil, fmt.Errorf("invalid location label: %s=%s", key, value)
+		}
+		merged[key] = value
+	}
+	merged[locationTenantLabel] = projectID
+	return merged, nil
 }
 
 func validateLocationSpec(spec infrastructurev1alpha1.LocationSpec, projectID string) error {
