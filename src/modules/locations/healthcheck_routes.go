@@ -55,9 +55,18 @@ type healthcheckSeries struct {
 	Alive     bool                `json:"alive"`
 	LastCheck time.Time           `json:"lastCheck"`
 	Results   []healthcheckResult `json:"results"`
+	Sources   []healthcheckSource `json:"sources"`
+}
+
+type healthcheckSource struct {
+	Source    string              `json:"source"`
+	Alive     bool                `json:"alive"`
+	LastCheck time.Time           `json:"lastCheck"`
+	Results   []healthcheckResult `json:"results"`
 }
 
 type healthcheckResult struct {
+	Source     string     `json:"source"`
 	Time       time.Time  `json:"time"`
 	Start      *time.Time `json:"start,omitempty"`
 	Code       *int32     `json:"code,omitempty"`
@@ -242,14 +251,15 @@ func parseHealthcheckLimit(c *gin.Context) (int, bool) {
 	return limit, true
 }
 
-// buildNodeHealthcheckReports groups records (newest first) per node and per check, keeping at most limit
-// results per check ordered oldest to newest. Nodes configured on the location are listed first in spec order.
+// Records arrive newest first. Keep independent limits for combined and per-source histories,
+// and calculate health from each source's latest result, not just the latest result overall.
 func buildNodeHealthcheckReports(spec infrastructurev1alpha1.LocationSpec, records []app.HealthcheckRecord, limit int) []nodeHealthcheckReport {
 	type seriesKey struct{ name, typ, target string }
 
 	reports := []*nodeHealthcheckReport{}
 	byNode := map[string]*nodeHealthcheckReport{}
 	seriesByNode := map[string]map[seriesKey]*healthcheckSeries{}
+	sourcesBySeries := map[*healthcheckSeries]map[string]*healthcheckSource{}
 
 	for _, group := range spec.NodeGroups {
 		for _, node := range group.Nodes {
@@ -280,18 +290,27 @@ func buildNodeHealthcheckReports(spec infrastructurev1alpha1.LocationSpec, recor
 		key := seriesKey{record.Name, record.Type, record.Target}
 		series, exists := seriesByNode[record.Node][key]
 		if !exists {
-			series = &healthcheckSeries{Name: record.Name, Type: record.Type, Target: record.Target, Alive: record.Alive, LastCheck: record.Time}
+			series = &healthcheckSeries{Name: record.Name, Type: record.Type, Target: record.Target, Alive: true, LastCheck: record.Time}
 			seriesByNode[record.Node][key] = series
+			sourcesBySeries[series] = map[string]*healthcheckSource{}
 		}
-		if len(series.Results) >= limit {
-			continue
+		source, exists := sourcesBySeries[series][record.Source]
+		if !exists {
+			source = &healthcheckSource{Source: record.Source, Alive: record.Alive, LastCheck: record.Time}
+			sourcesBySeries[series][record.Source] = source
+			series.Alive = series.Alive && source.Alive
 		}
-		result := healthcheckResult{Time: record.Time, Start: record.Start, Code: record.Code, Message: record.Message, Alive: record.Alive}
+		result := healthcheckResult{Source: record.Source, Time: record.Time, Start: record.Start, Code: record.Code, Message: record.Message, Alive: record.Alive}
 		if record.Duration != nil {
 			ms := float64(*record.Duration) / float64(time.Millisecond)
 			result.DurationMs = &ms
 		}
-		series.Results = append(series.Results, result)
+		if len(series.Results) < limit {
+			series.Results = append(series.Results, result)
+		}
+		if len(source.Results) < limit {
+			source.Results = append(source.Results, result)
+		}
 	}
 
 	sort.Slice(unconfigured, func(i, j int) bool { return unconfigured[i].Name < unconfigured[j].Name })
@@ -304,6 +323,14 @@ func buildNodeHealthcheckReports(spec infrastructurev1alpha1.LocationSpec, recor
 			for i, j := 0, len(series.Results)-1; i < j; i, j = i+1, j-1 {
 				series.Results[i], series.Results[j] = series.Results[j], series.Results[i]
 			}
+			series.Sources = make([]healthcheckSource, 0, len(sourcesBySeries[series]))
+			for _, source := range sourcesBySeries[series] {
+				for i, j := 0, len(source.Results)-1; i < j; i, j = i+1, j-1 {
+					source.Results[i], source.Results[j] = source.Results[j], source.Results[i]
+				}
+				series.Sources = append(series.Sources, *source)
+			}
+			sort.Slice(series.Sources, func(i, j int) bool { return series.Sources[i].Source < series.Sources[j].Source })
 			report.Checks = append(report.Checks, *series)
 		}
 		sort.Slice(report.Checks, func(i, j int) bool {

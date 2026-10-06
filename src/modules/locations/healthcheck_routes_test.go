@@ -78,6 +78,78 @@ func seedActiveProfile(t *testing.T, module *Module, name, tenant string, probes
 
 func ptr[T any](v T) *T { return &v }
 
+func TestLocationHealthchecksMultipleSources(t *testing.T) {
+	module := newLocationTestModule(t)
+	seedLocationWithNodes(t, module)
+	now := time.Now().UTC()
+	module.SetHealthcheckDB(&fakeHealthcheckReader{records: []app.HealthcheckRecord{
+		{Time: now, Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "fra", Alive: true},
+		{Time: now, Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "fra", Alive: true},
+		{Time: now.Add(-time.Second), Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "fra", Alive: false},
+		{Time: now.Add(-2 * time.Second), Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "ams", Alive: false},
+		{Time: now.Add(-3 * time.Second), Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "ams", Alive: true},
+		{Time: now.Add(-4 * time.Second), Node: "n2", Name: "http", Type: "HTTP", Target: "74.220.31.184", Source: "", Alive: true},
+		{Time: now.Add(-5 * time.Second), Node: "n2", Name: "removed", Type: "HTTP", Target: "74.220.31.184", Source: "inactive", Alive: false},
+	}})
+	router := gin.New()
+	module.RegisterRoutes(router)
+	recorder := performJSONRequest(router, http.MethodGet, "/project/project-a/locations/fra1-c1/healthchecks?limit=2", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response locationHealthchecksResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	node := response.Nodes[0]
+	if node.Status != nodeHealthUnhealthy || len(node.Checks) != 1 {
+		t.Fatalf("a failing source must affect node status: %+v", node)
+	}
+	check := node.Checks[0]
+	if check.Alive || len(check.Results) != 2 || !check.LastCheck.Equal(now) || len(check.Sources) != 3 {
+		t.Fatalf("unexpected combined check: %+v", check)
+	}
+	if check.Results[0].Source != "fra" || check.Results[1].Source != "fra" {
+		t.Fatalf("expected latest combined results with source identifiers: %+v", check.Results)
+	}
+	unknown, ams, fra := check.Sources[0], check.Sources[1], check.Sources[2]
+	if unknown.Source != "" || !unknown.Alive || len(unknown.Results) != 1 {
+		t.Fatalf("expected empty source to remain a distinct group: %+v", unknown)
+	}
+	if ams.Source != "ams" || ams.Alive || !ams.LastCheck.Equal(now.Add(-2*time.Second)) || len(ams.Results) != 2 {
+		t.Fatalf("older source must not be dropped by the combined result limit: %+v", ams)
+	}
+	if !ams.Results[0].Alive || ams.Results[1].Alive || ams.Results[0].Source != "ams" {
+		t.Fatalf("source results must be oldest to newest: %+v", ams.Results)
+	}
+	if fra.Source != "fra" || !fra.Alive || len(fra.Results) != 2 {
+		t.Fatalf("source status must use its latest result: %+v", fra)
+	}
+}
+
+func TestNodeHealthchecksRecoverIndependentlyBySource(t *testing.T) {
+	now := time.Now().UTC()
+	records := []app.HealthcheckRecord{
+		{Time: now, Node: "n1", Name: "http", Type: "HTTP", Source: "ams", Alive: true},
+		{Time: now.Add(-time.Second), Node: "n1", Name: "http", Type: "HTTP", Source: "fra", Alive: true},
+		{Time: now.Add(-2 * time.Second), Node: "n1", Name: "http", Type: "HTTP", Source: "ams", Alive: false},
+		{Time: now.Add(-3 * time.Second), Node: "n1", Name: "http", Type: "HTTP", Source: "fra", Alive: false},
+	}
+	reports := buildNodeHealthcheckReports(infrastructurev1alpha1.LocationSpec{}, records, 60)
+	if len(reports) != 1 || reports[0].Status != nodeHealthHealthy {
+		t.Fatalf("older failures must not override latest source results: %+v", reports)
+	}
+	check := reports[0].Checks[0]
+	if !check.Alive || len(check.Sources) != 2 || len(check.Results) != 4 {
+		t.Fatalf("expected healthy check with merged and per-source history: %+v", check)
+	}
+	for i := 1; i < len(check.Results); i++ {
+		if check.Results[i].Time.Before(check.Results[i-1].Time) {
+			t.Fatal("combined history must be chronological")
+		}
+	}
+}
+
 func TestLocationHealthchecksGroupsByNodeAndCheck(t *testing.T) {
 	module := newLocationTestModule(t)
 	seedLocationWithNodes(t, module)

@@ -32,6 +32,7 @@ type HealthcheckRecord struct {
 	Type     string     `json:"type"`
 	Node     string     `json:"node"`
 	Location string     `json:"location"`
+	Source   string     `json:"source"`
 	Code     *int32     `json:"code,omitempty"`
 	Message  string     `json:"message"`
 	Target   string     `json:"target"`
@@ -105,7 +106,7 @@ func (d *HealthcheckDB) Close() {
 
 const recentHealthchecksQuery = `
 SELECT time, start, COALESCE(name, ''), COALESCE(type, ''), COALESCE(node, ''), COALESCE(location, ''),
-       code, COALESCE(message, ''), COALESCE(target, ''), COALESCE(alive, false), duration
+       code, COALESCE(message, ''), COALESCE(target, ''), COALESCE(alive, false), duration, COALESCE(source, '')
 FROM healthchecks
 WHERE location = $1 AND time >= $2
 ORDER BY time DESC
@@ -125,7 +126,7 @@ func (d *HealthcheckDB) RecentHealthchecks(ctx context.Context, location string,
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (HealthcheckRecord, error) {
 		var r HealthcheckRecord
-		err := row.Scan(&r.Time, &r.Start, &r.Name, &r.Type, &r.Node, &r.Location, &r.Code, &r.Message, &r.Target, &r.Alive, &r.Duration)
+		err := row.Scan(&r.Time, &r.Start, &r.Name, &r.Type, &r.Node, &r.Location, &r.Code, &r.Message, &r.Target, &r.Alive, &r.Duration, &r.Source)
 		return r, err
 	})
 }
