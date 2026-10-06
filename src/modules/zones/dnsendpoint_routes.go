@@ -13,8 +13,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1validation "k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 var dnsEndpointGVR = schema.GroupVersionResource{
@@ -30,6 +32,42 @@ var serviceGVR = schema.GroupVersionResource{
 }
 
 const serviceDNSEndpointRecordTTL = 10
+
+func validateDNSEndpointRouting(spec *infrastructurev1alpha1.DNSEndpointSpec, projectID string) error {
+	if spec.RoutingPolicy == "" {
+		spec.RoutingPolicy = "Simple"
+	}
+	switch spec.RoutingPolicy {
+	case "Simple", "Failover":
+		if len(spec.Targets) == 0 {
+			return fmt.Errorf("at least one target is required for %s routing", spec.RoutingPolicy)
+		}
+		spec.RouteSelector = nil
+	case "RoundRobin", "Weighted", "Geolocation":
+		if spec.RouteSelector == nil {
+			return fmt.Errorf("routeSelector is required for %s routing", spec.RoutingPolicy)
+		}
+		if len(spec.RouteSelector.MatchExpressions) > 0 {
+			return fmt.Errorf("routeSelector only supports matchLabels, not matchExpressions")
+		}
+		const tenantLabel = "edgecdnx.com/tenant"
+		selector := spec.RouteSelector.DeepCopy()
+		if tenant, exists := selector.MatchLabels[tenantLabel]; exists && tenant != projectID {
+			return fmt.Errorf("routeSelector tenant label must match the project")
+		}
+		if selector.MatchLabels == nil {
+			selector.MatchLabels = make(map[string]string)
+		}
+		selector.MatchLabels[tenantLabel] = projectID
+		if errs := metav1validation.ValidateLabelSelector(selector, metav1validation.LabelSelectorValidationOptions{}, field.NewPath("routeSelector")); len(errs) > 0 {
+			return fmt.Errorf("invalid routeSelector: %s", errs.ToAggregate())
+		}
+		spec.RouteSelector = selector
+	default:
+		return fmt.Errorf("unsupported routing policy %q", spec.RoutingPolicy)
+	}
+	return nil
+}
 
 func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 	group.GET("/:zone-id/dns-endpoints", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("read").Build(), func(c *gin.Context) {
@@ -88,7 +126,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid DNS name %q for %s record", dto.DNSName, dto.RecordType)})
 			return
 		}
-		if !validDNSEndpointTargets(dto.RecordType, dto.Targets) {
+		if dto.RoutingPolicy != "Failover" && !validDNSEndpointTargets(dto.RecordType, dto.Targets) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid targets for %s record", dto.RecordType)})
 			return
 		}
@@ -117,11 +155,17 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			},
 			Spec: infrastructurev1alpha1.DNSEndpointSpec{
 				DNSName:       dto.DNSName,
-				RoutingPolicy: "Simple",
+				RoutingPolicy: dto.RoutingPolicy,
 				RecordTTL:     dto.RecordTTL,
 				RecordType:    dto.RecordType,
 				Targets:       dto.Targets,
+				RouteSelector: dto.RouteSelector,
 			},
+		}
+
+		if err := validateDNSEndpointRouting(&dnsEndpoint.Spec, c.Param("project-id")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(dnsEndpoint)
@@ -182,8 +226,16 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 		if dto.Targets != nil {
 			dnsEndpoint.Spec.Targets = dto.Targets
 		}
-		dnsEndpoint.Spec.RoutingPolicy = "Simple"
-		dnsEndpoint.Spec.RouteSelector = nil
+		if dto.RoutingPolicy != "" {
+			dnsEndpoint.Spec.RoutingPolicy = dto.RoutingPolicy
+		}
+		if dto.RouteSelector != nil {
+			dnsEndpoint.Spec.RouteSelector = dto.RouteSelector
+		}
+		if err := validateDNSEndpointRouting(&dnsEndpoint.Spec, c.Param("project-id")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		if !dnsNameBelongsToZone(dnsEndpoint.Spec.DNSName, zone.Spec.Zone) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("dnsName %q is outside zone %q", dnsEndpoint.Spec.DNSName, zone.Spec.Zone)})
@@ -193,7 +245,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid DNS name %q for %s record", dnsEndpoint.Spec.DNSName, dnsEndpoint.Spec.RecordType)})
 			return
 		}
-		if !validDNSEndpointTargets(dnsEndpoint.Spec.RecordType, dnsEndpoint.Spec.Targets) {
+		if dnsEndpoint.Spec.RoutingPolicy != "Failover" && !validDNSEndpointTargets(dnsEndpoint.Spec.RecordType, dnsEndpoint.Spec.Targets) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid targets for %s record", dnsEndpoint.Spec.RecordType)})
 			return
 		}

@@ -203,7 +203,7 @@ func TestCreateDNSEndpointValidation(t *testing.T) {
 	}{
 		{
 			name: "unsupported routing policy",
-			body: `{"dnsName":"www.example.com","routingPolicy":"Weighted","recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`,
+			body: `{"dnsName":"www.example.com","routingPolicy":"Unknown","recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`,
 		},
 		{
 			name: "DNS name outside zone",
