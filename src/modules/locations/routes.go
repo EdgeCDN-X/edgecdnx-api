@@ -17,7 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-const locationTenantLabel = "edgecdnx.com/tenant"
+const (
+	locationProjectLabel = "project"
+)
 
 var locationGVR = schema.GroupVersionResource{
 	Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
@@ -30,7 +32,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/locations", m.middlewares...)
 	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
 		objects, err := m.client.Resource(locationGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: labels.Set{locationTenantLabel: c.Param("project-id")}.String(),
+			LabelSelector: labels.Set{locationProjectLabel: c.Param("project-id")}.String(),
 		})
 		if err != nil {
 			writeLocationError(c, "list", err)
@@ -180,7 +182,7 @@ func (m *Module) getProjectLocation(c *gin.Context) (*unstructured.Unstructured,
 		writeLocationError(c, "get", err)
 		return nil, false
 	}
-	if object.GetLabels()[locationTenantLabel] != c.Param("project-id") {
+	if object.GetLabels()[locationProjectLabel] != c.Param("project-id") {
 		writeLocationError(c, "get", apierrors.NewNotFound(locationGVR.GroupResource(), c.Param("location-id")))
 		return nil, false
 	}
@@ -204,13 +206,13 @@ func writeLocationError(c *gin.Context, operation string, err error) {
 
 func mergeLocationLabels(requested map[string]string, projectID string) (map[string]string, error) {
 	if problems := validation.IsValidLabelValue(projectID); len(problems) > 0 {
-		return nil, fmt.Errorf("invalid project ID for tenant label: %v", problems)
+		return nil, fmt.Errorf("invalid project ID for project label: %v", problems)
 	}
-	merged := make(map[string]string, len(requested)+1)
+	merged := make(map[string]string, len(requested)+2)
 	for key, value := range requested {
-		if key == locationTenantLabel {
+		if key == locationProjectLabel {
 			if value != projectID {
-				return nil, fmt.Errorf("label %s is managed automatically and cannot be changed", locationTenantLabel)
+				return nil, fmt.Errorf("label %s is managed automatically and cannot be changed", key)
 			}
 			continue
 		}
@@ -219,13 +221,13 @@ func mergeLocationLabels(requested map[string]string, projectID string) (map[str
 		}
 		merged[key] = value
 	}
-	merged[locationTenantLabel] = projectID
+	merged[locationProjectLabel] = projectID
 	return merged, nil
 }
 
 func validateLocationSpec(spec infrastructurev1alpha1.LocationSpec, projectID string) error {
 	if problems := validation.IsValidLabelValue(projectID); len(problems) > 0 {
-		return fmt.Errorf("invalid project ID for tenant label: %v", problems)
+		return fmt.Errorf("invalid project ID for project label: %v", problems)
 	}
 	if spec.GeoLookup.Weight < 0 || spec.GeoLookup.Weight > 1000 {
 		return fmt.Errorf("geoLookup.weight must be between 0 and 1000")
@@ -244,8 +246,8 @@ func validateLocationSpec(spec infrastructurev1alpha1.LocationSpec, projectID st
 			if len(validation.IsQualifiedName(key)) > 0 || len(validation.IsValidLabelValue(value)) > 0 {
 				return fmt.Errorf("invalid node group label: %s=%s", key, value)
 			}
-			if key == locationTenantLabel && value != projectID {
-				return fmt.Errorf("node group tenant label must match the project ID")
+			if key == locationProjectLabel && value != projectID {
+				return fmt.Errorf("node group project label must match the project ID")
 			}
 		}
 		nodes := make(map[string]struct{}, len(group.Nodes))

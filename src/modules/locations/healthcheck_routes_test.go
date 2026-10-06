@@ -41,7 +41,7 @@ func seedLocationWithNodes(t *testing.T, module *Module) {
 		TypeMeta: metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "Location"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "fra1-c1", Namespace: module.cfg.Namespace,
-			Labels: map[string]string{locationTenantLabel: "project-a"},
+			Labels: map[string]string{locationProjectLabel: "project-a"},
 		},
 		Spec: infrastructurev1alpha1.LocationSpec{NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{{
 			Name: "nginx", Flavor: "default", HealthCheck: &corev1.LocalObjectReference{Name: "default"},
@@ -57,13 +57,13 @@ func seedLocationWithNodes(t *testing.T, module *Module) {
 	}
 }
 
-func seedActiveProfile(t *testing.T, module *Module, name, tenant string, probes []infrastructurev1alpha1.HealthCheckProbeSpec) {
+func seedActiveProfile(t *testing.T, module *Module, name, projectID string, probes []infrastructurev1alpha1.HealthCheckProbeSpec) {
 	t.Helper()
 	profile := &infrastructurev1alpha1.HealthCheckProfile{
 		TypeMeta: metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "HealthCheckProfile"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: module.cfg.Namespace,
-			Labels: map[string]string{locationTenantLabel: tenant},
+			Labels: map[string]string{locationProjectLabel: projectID},
 		},
 		Spec: infrastructurev1alpha1.HealthCheckProfileSpec{Probes: probes},
 	}
@@ -296,7 +296,7 @@ func TestActiveLocationChecksUseNodeProfilesAndCurrentTargets(t *testing.T) {
 		{Name: "custom", Type: infrastructurev1alpha1.HealthCheckProbeTypeHTTP, HTTP: &infrastructurev1alpha1.HTTPHealthCheckProbeSpec{Stack: infrastructurev1alpha1.StackTypeIPv4, Target: "custom.example"}},
 	})
 	location := infrastructurev1alpha1.Location{
-		ObjectMeta: metav1.ObjectMeta{Namespace: module.cfg.Namespace, Labels: map[string]string{locationTenantLabel: "project-a"}},
+		ObjectMeta: metav1.ObjectMeta{Namespace: module.cfg.Namespace, Labels: map[string]string{locationProjectLabel: "project-a"}},
 		Spec: infrastructurev1alpha1.LocationSpec{NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{
 			{HealthCheck: &corev1.LocalObjectReference{Name: "group"}, Nodes: []infrastructurev1alpha1.NodeSpec{
 				{Name: "inherited", Ipv4: "1.2.3.4", Ipv6: "::1"},
@@ -389,6 +389,6 @@ func TestLocationHealthchecksErrors(t *testing.T) {
 		}
 	}
 	if recorder := performJSONRequest(router, http.MethodGet, "/project/project-a/locations/other/healthchecks", ""); recorder.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for other tenant location, got %d", recorder.Code)
+		t.Fatalf("expected 404 for other project location, got %d", recorder.Code)
 	}
 }

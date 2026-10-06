@@ -50,15 +50,15 @@ func validateDNSEndpointRouting(spec *infrastructurev1alpha1.DNSEndpointSpec, pr
 		if len(spec.RouteSelector.MatchExpressions) > 0 {
 			return fmt.Errorf("routeSelector only supports matchLabels, not matchExpressions")
 		}
-		const tenantLabel = "edgecdnx.com/tenant"
+		const projectLabel = "project"
 		selector := spec.RouteSelector.DeepCopy()
-		if tenant, exists := selector.MatchLabels[tenantLabel]; exists && tenant != projectID {
-			return fmt.Errorf("routeSelector tenant label must match the project")
+		if project, exists := selector.MatchLabels[projectLabel]; exists && project != projectID {
+			return fmt.Errorf("routeSelector project label must match the project")
 		}
 		if selector.MatchLabels == nil {
 			selector.MatchLabels = make(map[string]string)
 		}
-		selector.MatchLabels[tenantLabel] = projectID
+		selector.MatchLabels[projectLabel] = projectID
 		if errs := metav1validation.ValidateLabelSelector(selector, metav1validation.LabelSelectorValidationOptions{}, field.NewPath("routeSelector")); len(errs) > 0 {
 			return fmt.Errorf("invalid routeSelector: %s", errs.ToAggregate())
 		}

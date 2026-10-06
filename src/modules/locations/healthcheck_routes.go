@@ -150,7 +150,7 @@ func (m *Module) activeLocationChecks(ctx context.Context, location infrastructu
 				if err != nil {
 					return nil, fmt.Errorf("get healthcheck profile %q: %w", ref.Name, err)
 				}
-				if object.GetLabels()[locationTenantLabel] != location.Labels[locationTenantLabel] {
+				if object.GetLabels()[locationProjectLabel] != location.Labels[locationProjectLabel] {
 					return nil, fmt.Errorf("healthcheck profile %q does not belong to the location's project", ref.Name)
 				}
 				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &profile); err != nil {

@@ -58,7 +58,7 @@ func TestHealthCheckProfileLifecycle(t *testing.T) {
 		t.Fatalf("create: %d %s", response.Code, response.Body.String())
 	}
 	created := decodeProfile(t, response.Body.Bytes())
-	if len(created.Labels) != 1 || created.Labels[locationTenantLabel] != "project-a" || created.Namespace != "edgecdnx" ||
+	if len(created.Labels) != 1 || created.Labels[locationProjectLabel] != "project-a" || created.Namespace != "edgecdnx" ||
 		len(created.Spec.Probes) != 3 || created.Spec.Probes[1].HTTP.Protocol != "https" ||
 		created.Spec.Probes[0].Interval.Duration.String() != "30s" || created.Spec.Probes[2].Assume.Status != "Healthy" {
 		t.Fatalf("unexpected profile: %#v", created)
@@ -76,7 +76,7 @@ func TestHealthCheckProfileLifecycle(t *testing.T) {
 	}
 	object.Object["status"] = map[string]interface{}{"status": "Healthy"}
 	object.SetAnnotations(map[string]string{"managed-by": "controller"})
-	object.SetLabels(map[string]string{locationTenantLabel: "project-a", "legacy": "label"})
+	object.SetLabels(map[string]string{locationProjectLabel: "project-a", "legacy": "label"})
 	if _, err := module.client.Resource(healthCheckProfileGVR).Namespace("edgecdnx").Update(context.Background(), object, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestHealthCheckProfileLifecycle(t *testing.T) {
 		t.Fatalf("patch: %d %s", response.Code, response.Body.String())
 	}
 	updated := decodeProfile(t, response.Body.Bytes())
-	if len(updated.Spec.Probes) != 3 || len(updated.Labels) != 1 || updated.Labels[locationTenantLabel] != "project-a" || updated.Status.Status != "Healthy" || updated.Annotations["managed-by"] != "controller" {
+	if len(updated.Spec.Probes) != 3 || len(updated.Labels) != 1 || updated.Labels[locationProjectLabel] != "project-a" || updated.Status.Status != "Healthy" || updated.Annotations["managed-by"] != "controller" {
 		t.Fatalf("patch failed to preserve fields: %#v", updated)
 	}
 	response = performJSONRequest(router, http.MethodPatch, profilePath+"/web", `{"probes":[{"name":"down","type":"ASSUME","assume":{"status":"Unhealthy"}}]}`)
@@ -106,19 +106,19 @@ func TestHealthCheckProfileLifecycle(t *testing.T) {
 	}
 }
 
-func TestHealthCheckProfileTenantIsolation(t *testing.T) {
+func TestHealthCheckProfileProjectIsolation(t *testing.T) {
 	module, router := newProfileTestRouter(t)
-	for _, tenant := range []string{"project-b", "global", ""} {
+	for _, projectID := range []string{"project-b", "global", ""} {
 		name := "foreign"
-		if tenant == "global" {
+		if projectID == "global" {
 			name = "shared"
 		}
-		if tenant == "" {
+		if projectID == "" {
 			name = "unowned"
 		}
 		profile := &infrastructurev1alpha1.HealthCheckProfile{
 			TypeMeta:   metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "HealthCheckProfile"},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "edgecdnx", Labels: map[string]string{locationTenantLabel: tenant}},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "edgecdnx", Labels: map[string]string{locationProjectLabel: projectID}},
 		}
 		object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(profile)
 		if err != nil {
@@ -130,7 +130,7 @@ func TestHealthCheckProfileTenantIsolation(t *testing.T) {
 	}
 	response := performJSONRequest(router, http.MethodGet, profilePath, "")
 	if response.Code != 200 || response.Body.String() != "[]" {
-		t.Fatalf("tenant list leaked: %d %s", response.Code, response.Body.String())
+		t.Fatalf("project list leaked: %d %s", response.Code, response.Body.String())
 	}
 	for _, name := range []string{"foreign", "shared", "unowned", "missing"} {
 		for _, method := range []string{"GET", "PATCH", "DELETE"} {
@@ -150,9 +150,9 @@ func TestHealthCheckProfileTenantIsolation(t *testing.T) {
 			t.Fatalf("expected forbidden: %d %s", response.Code, response.Body.String())
 		}
 	}
-	response = performJSONRequest(router, "POST", profilePath, `{"name":"other","labels":{"edgecdnx.com/tenant":"project-b"},"probes":[{"name":"up","type":"ASSUME","assume":{"status":"Healthy"}}]}`)
+	response = performJSONRequest(router, "POST", profilePath, `{"name":"other","labels":{"project":"project-b"},"probes":[{"name":"up","type":"ASSUME","assume":{"status":"Healthy"}}]}`)
 	if response.Code != 400 {
-		t.Fatalf("tenant override accepted: %d", response.Code)
+		t.Fatalf("project override accepted: %d", response.Code)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestHealthCheckProfileValidation(t *testing.T) {
 	if response := performJSONRequest(router, "POST", profilePath, validProfileBody); response.Code != 201 {
 		t.Fatal(response.Body.String())
 	}
-	for _, body := range []string{`{"probes":[]}`, `{"labels":{"edgecdnx.com/tenant":"global"}}`, `{"labels":{"bad/key/name":"x"}}`} {
+	for _, body := range []string{`{"probes":[]}`, `{"labels":{"project":"global"}}`, `{"labels":{"bad/key/name":"x"}}`} {
 		response := performJSONRequest(router, "PATCH", profilePath+"/web", body)
 		if response.Code != 400 {
 			t.Fatalf("invalid patch accepted: %d %s", response.Code, response.Body.String())
@@ -197,7 +197,7 @@ func TestHealthCheckProfileRejectsConfigurableLabels(t *testing.T) {
 	if response := performJSONRequest(router, "POST", profilePath, validProfileBody); response.Code != 201 {
 		t.Fatal(response.Body.String())
 	}
-	for _, labels := range []string{`{}`, `null`, `{"region":"eu"}`, `{"edgecdnx.com/tenant":"project-a"}`} {
+	for _, labels := range []string{`{}`, `null`, `{"region":"eu"}`, `{"project":"project-a"}`} {
 		for _, method := range []string{"POST", "PATCH"} {
 			path := profilePath
 			body := `{"name":"other","probes":[{"name":"up","type":"ASSUME","assume":{"status":"Healthy"}}],"labels":` + labels + `}`
@@ -213,7 +213,7 @@ func TestHealthCheckProfileRejectsConfigurableLabels(t *testing.T) {
 	}
 	response := performJSONRequest(router, "GET", profilePath+"/web", "")
 	profile := decodeProfile(t, response.Body.Bytes())
-	if len(profile.Labels) != 1 || profile.Labels[locationTenantLabel] != "project-a" {
+	if len(profile.Labels) != 1 || profile.Labels[locationProjectLabel] != "project-a" {
 		t.Fatalf("unexpected labels after rejected requests: %#v", profile.Labels)
 	}
 }

@@ -63,13 +63,13 @@ func performJSONRequest(router http.Handler, method, path, body string) *httptes
 	return recorder
 }
 
-func seedTestLocation(t *testing.T, module *Module, name, tenant string) {
+func seedTestLocation(t *testing.T, module *Module, name, projectID string) {
 	t.Helper()
 	location := &infrastructurev1alpha1.Location{
 		TypeMeta: metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "Location"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: module.cfg.Namespace,
-			Labels: map[string]string{locationTenantLabel: tenant},
+			Labels: map[string]string{locationProjectLabel: projectID},
 		},
 	}
 	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(location)
@@ -108,7 +108,7 @@ func TestLocationLifecycle(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created location: %v", err)
 	}
-	if created.Labels[locationTenantLabel] != "project-a" || created.Namespace != module.cfg.Namespace {
+	if created.Labels[locationProjectLabel] != "project-a" || created.Namespace != module.cfg.Namespace {
 		t.Fatalf("unexpected ownership: %#v", created.ObjectMeta)
 	}
 	if len(created.Spec.NodeGroups) != 1 || created.Spec.NodeGroups[0].Metadata["maxSize"] != "10g" ||
@@ -150,7 +150,7 @@ func TestLocationLifecycle(t *testing.T) {
 	}
 	if updated.Spec.Weight != 0 || len(updated.Spec.FallbackLocations) != 0 ||
 		len(updated.Spec.NodeGroups) != 1 || updated.Spec.GeoLookup.Weight != 100 ||
-		updated.Labels[locationTenantLabel] != "project-a" {
+		updated.Labels[locationProjectLabel] != "project-a" {
 		t.Fatalf("patch did not preserve omitted fields or clear explicit values: %#v", updated)
 	}
 	response = performJSONRequest(router, http.MethodPatch, itemPath, `{"nodeGroups":[],"geoLookup":{}}`)
@@ -174,7 +174,7 @@ func TestLocationLifecycle(t *testing.T) {
 	}
 }
 
-func TestLocationTenantIsolation(t *testing.T) {
+func TestLocationProjectIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	module := newLocationTestModule(t)
 	seedTestLocation(t, module, "foreign", "project-b")
@@ -193,7 +193,7 @@ func TestLocationTenantIsolation(t *testing.T) {
 		}
 	}
 	object, err := module.client.Resource(locationGVR).Namespace(module.cfg.Namespace).Get(context.Background(), "foreign", metav1.GetOptions{})
-	if err != nil || object.GetLabels()[locationTenantLabel] != "project-b" {
+	if err != nil || object.GetLabels()[locationProjectLabel] != "project-b" {
 		t.Fatalf("foreign location was mutated or deleted: %v, %#v", err, object)
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
@@ -222,7 +222,7 @@ func TestLocationValidationAndErrors(t *testing.T) {
 		`{"name":"test","geoLookup":{"weight":1001}}`,
 		`{"name":"test","geoLookup":{"weight":-1}}`,
 		`{"name":"test","nodeGroups":[{}]}`,
-		`{"name":"test","nodeGroups":[{"name":"nginx","flavor":"standard","labels":{"edgecdnx.com/tenant":"project-b"}}]}`,
+		`{"name":"test","nodeGroups":[{"name":"nginx","flavor":"standard","labels":{"project":"project-b"}}]}`,
 		`{"name":"test","nodeGroups":[{"name":"nginx","flavor":"standard","labels":{"invalid label":"test"}}]}`,
 		`{"name":"test","nodeGroups":[{"name":"nginx","flavor":"standard"},{"name":"nginx","flavor":"standard"}]}`,
 		`{"name":"test","nodeGroups":[{"name":"nginx","flavor":"standard","nodes":[{}]}]}`,
@@ -235,7 +235,7 @@ func TestLocationValidationAndErrors(t *testing.T) {
 	}
 	for _, body := range []string{
 		`{"geoLookup":{"weight":1001}}`,
-		`{"nodeGroups":[{"name":"nginx","flavor":"standard","labels":{"edgecdnx.com/tenant":"project-b"}}]}`,
+		`{"nodeGroups":[{"name":"nginx","flavor":"standard","labels":{"project":"project-b"}}]}`,
 		`{"weight":"invalid"}`,
 	} {
 		response := performJSONRequest(router, http.MethodPatch, path+"/fra1", body)
@@ -276,7 +276,7 @@ func TestLocationResourceLabels(t *testing.T) {
 		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
 	}
 	labels := decode(response)
-	if labels[locationTenantLabel] != "project-a" || labels["edgecdnx.com/route-kind"] != "static" || labels["region"] != "eu" || len(labels) != 3 {
+	if labels[locationProjectLabel] != "project-a" || labels["edgecdnx.com/route-kind"] != "static" || labels["region"] != "eu" || len(labels) != 3 {
 		t.Fatalf("unexpected created labels: %#v", labels)
 	}
 
@@ -285,12 +285,12 @@ func TestLocationResourceLabels(t *testing.T) {
 		t.Fatalf("label update returned %d: %s", response.Code, response.Body.String())
 	}
 	labels = decode(response)
-	if labels[locationTenantLabel] != "project-a" || labels["region"] != "us" || len(labels) != 2 {
-		t.Fatalf("expected labels replaced and tenant kept, got %#v", labels)
+	if labels[locationProjectLabel] != "project-a" || labels["region"] != "us" || len(labels) != 2 {
+		t.Fatalf("expected labels replaced and project kept, got %#v", labels)
 	}
 
 	response = performJSONRequest(router, http.MethodPatch, path+"/fra1", `{"labels":{}}`)
-	if labels = decode(response); response.Code != http.StatusOK || len(labels) != 1 || labels[locationTenantLabel] != "project-a" {
+	if labels = decode(response); response.Code != http.StatusOK || len(labels) != 1 || labels[locationProjectLabel] != "project-a" {
 		t.Fatalf("clearing labels returned %d: %#v", response.Code, labels)
 	}
 
@@ -300,8 +300,8 @@ func TestLocationResourceLabels(t *testing.T) {
 	}
 
 	for _, body := range []string{
-		`{"name":"fra2","labels":{"edgecdnx.com/tenant":"project-b"}}`,
-		`{"name":"fra2","labels":{"edgecdnx.com/tenant":""}}`,
+		`{"name":"fra2","labels":{"project":"project-b"}}`,
+		`{"name":"fra2","labels":{"project":""}}`,
 		`{"name":"fra2","labels":{"invalid key":"x"}}`,
 		`{"name":"fra2","labels":{"region":"not valid!"}}`,
 	} {
@@ -309,12 +309,12 @@ func TestLocationResourceLabels(t *testing.T) {
 			t.Fatalf("create %s: expected 400, got %d", body, response.Code)
 		}
 	}
-	if response := performJSONRequest(router, http.MethodPatch, path+"/fra1", `{"labels":{"edgecdnx.com/tenant":"project-b"}}`); response.Code != http.StatusBadRequest {
-		t.Fatalf("tenant override on update: expected 400, got %d", response.Code)
+	if response := performJSONRequest(router, http.MethodPatch, path+"/fra1", `{"labels":{"project":"project-b"}}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("project override on update: expected 400, got %d", response.Code)
 	}
 	object, err := module.client.Resource(locationGVR).Namespace(module.cfg.Namespace).Get(context.Background(), "fra1", metav1.GetOptions{})
-	if err != nil || object.GetLabels()[locationTenantLabel] != "project-a" {
-		t.Fatalf("tenant label changed: %v %#v", err, object.GetLabels())
+	if err != nil || object.GetLabels()[locationProjectLabel] != "project-a" {
+		t.Fatalf("project label changed: %v %#v", err, object.GetLabels())
 	}
 }
 

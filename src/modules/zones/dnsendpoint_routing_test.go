@@ -37,7 +37,7 @@ func TestDNSEndpointRoutingPolicies(t *testing.T) {
 				t.Fatalf("unexpected policy: %s", created.Spec.RoutingPolicy)
 			}
 			if dynamic {
-				want := map[string]string{"region": "eu", "edgecdnx.com/tenant": "project-a"}
+				want := map[string]string{"region": "eu", "project": "project-a"}
 				if created.Spec.RouteSelector == nil || !reflect.DeepEqual(created.Spec.RouteSelector.MatchLabels, want) {
 					t.Fatalf("unexpected selector: %#v", created.Spec.RouteSelector)
 				}
@@ -76,8 +76,8 @@ func TestDNSEndpointRoutingValidation(t *testing.T) {
 	for _, routing := range []string{
 		`"routingPolicy":"RoundRobin"`,
 		`"routingPolicy":"Weighted","routeSelector":null`,
-		`"routingPolicy":"Geolocation","routeSelector":{"matchLabels":{"edgecdnx.com/tenant":"project-b"}}`,
-		`"routingPolicy":"Geolocation","routeSelector":{"matchLabels":{"edgecdnx.com/tenant":""}}`,
+		`"routingPolicy":"Geolocation","routeSelector":{"matchLabels":{"project":"project-b"}}`,
+		`"routingPolicy":"Geolocation","routeSelector":{"matchLabels":{"project":""}}`,
 		`"routingPolicy":"RoundRobin","routeSelector":{"matchLabels":{"bad/key/name":"eu"}}`,
 		`"routingPolicy":"Weighted","routeSelector":{"matchLabels":{"region":"bad value"}}`,
 		`"routingPolicy":"Weighted","routeSelector":{"matchExpressions":[{"key":"region","operator":"Exists"}]}`,
@@ -144,7 +144,7 @@ func TestDNSEndpointRoutingSwitchAndSelectorReplacement(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &endpoint); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(endpoint.Spec.RouteSelector.MatchLabels, map[string]string{"edgecdnx.com/tenant": "project-a"}) {
+	if !reflect.DeepEqual(endpoint.Spec.RouteSelector.MatchLabels, map[string]string{"project": "project-a"}) {
 		t.Fatalf("selector not replaced: %#v", endpoint.Spec.RouteSelector)
 	}
 }

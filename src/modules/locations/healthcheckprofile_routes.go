@@ -33,7 +33,7 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 	}
 	group.GET("", authorize("read"), func(c *gin.Context) {
 		objects, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: labels.Set{locationTenantLabel: c.Param("project-id")}.String(),
+			LabelSelector: labels.Set{locationProjectLabel: c.Param("project-id")}.String(),
 		})
 		if err != nil {
 			writeHealthCheckProfileError(c, "list", err)
@@ -113,7 +113,9 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 			}
 			object.Object["spec"] = spec
 		}
-		object.SetLabels(map[string]string{locationTenantLabel: c.Param("project-id")})
+		object.SetLabels(map[string]string{
+			locationProjectLabel: c.Param("project-id"),
+		})
 		updated, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).Update(c, object, metav1.UpdateOptions{})
 		if err != nil {
 			writeHealthCheckProfileError(c, "update", err)
@@ -156,7 +158,7 @@ func (m *Module) getProjectHealthCheckProfile(c *gin.Context) (*unstructured.Uns
 		writeHealthCheckProfileError(c, "get", err)
 		return nil, false
 	}
-	if object.GetLabels()[locationTenantLabel] != c.Param("project-id") {
+	if object.GetLabels()[locationProjectLabel] != c.Param("project-id") {
 		writeHealthCheckProfileError(c, "get", apierrors.NewNotFound(healthCheckProfileGVR.GroupResource(), c.Param("profile-id")))
 		return nil, false
 	}
