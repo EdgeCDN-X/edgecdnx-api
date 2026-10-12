@@ -32,7 +32,7 @@ var locationGVR = schema.GroupVersionResource{
 func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("/admin", m.middlewares...)
 
-	group.GET("/prefixlists", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R("prefixlist").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/prefixlists", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R(auth.ResourceTypePrefixList).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.dynClient.Resource(prefixListGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list prefixlists: " + err.Error()})
@@ -50,7 +50,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(200, items)
 	})
 
-	group.GET("/zones", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R("zone").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/zones", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R(auth.ResourceTypeZone).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.dynClient.Resource(zoneGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list zones: " + err.Error()})
@@ -68,7 +68,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(200, items)
 	})
 
-	group.GET("/locations", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/locations", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R(auth.ResourceTypeLocation).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.dynClient.Resource(locationGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list locations: " + err.Error()})
@@ -86,7 +86,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(200, items)
 	})
 
-	group.GET("/location-healths", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/location-healths", auth.NewAuthzBuilder().E(m.enforcer).ST(m.cfg.DefaultAdminProject).R(auth.ResourceTypeLocation).S("user_id").A("read").Build(), func(c *gin.Context) {
 		if m.prometheus == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "prometheus client is not configured"})
 			return

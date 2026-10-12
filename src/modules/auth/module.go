@@ -45,6 +45,30 @@ e = some(where (p.eft == allow))
 m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && (keyMatch2(r.res, p.res)) && r.act == p.act
 `
 
+const (
+	ResourceTypeAll                = "*"
+	ResourceTypeProject            = "project"
+	ResourceTypeService            = "service"
+	ResourceTypeZone               = "zone"
+	ResourceTypeLocation           = "location"
+	ResourceTypeHealthCheckProfile = "healthcheckprofile"
+	ResourceTypePrefixList         = "prefixlist"
+)
+
+var resourceTypes = []string{
+	ResourceTypeAll,
+	ResourceTypeHealthCheckProfile,
+	ResourceTypeLocation,
+	ResourceTypePrefixList,
+	ResourceTypeProject,
+	ResourceTypeService,
+	ResourceTypeZone,
+}
+
+func ResourceTypes() []string {
+	return append([]string(nil), resourceTypes...)
+}
+
 type OIDCGroupMapping struct {
 	OIDCGroup string
 	Tenant    string

@@ -30,7 +30,7 @@ var locationGVR = schema.GroupVersionResource{
 func (m *Module) RegisterRoutes(r *gin.Engine) {
 	m.registerHealthCheckProfileRoutes(r)
 	group := r.Group("project/:project-id/locations", m.middlewares...)
-	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objects, err := m.client.Resource(locationGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
 			LabelSelector: labels.Set{locationProjectLabel: c.Param("project-id")}.String(),
 		})
@@ -50,7 +50,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		c.JSON(http.StatusOK, locations)
 	})
 
-	group.GET("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("read").Build(), func(c *gin.Context) {
 		object, ok := m.getProjectLocation(c)
 		if !ok {
 			return
@@ -58,9 +58,9 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		writeLocationResponse(c, http.StatusOK, object)
 	})
 
-	group.GET("/:location-id/healthchecks", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("read").Build(), m.getLocationHealthchecks)
+	group.GET("/:location-id/healthchecks", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("read").Build(), m.getLocationHealthchecks)
 
-	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("create").Build(), func(c *gin.Context) {
+	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("create").Build(), func(c *gin.Context) {
 		var dto CreateLocationDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
@@ -106,7 +106,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		writeLocationResponse(c, http.StatusCreated, created)
 	})
 
-	group.PATCH("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.PATCH("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto UpdateLocationDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
@@ -159,7 +159,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		writeLocationResponse(c, http.StatusOK, updated)
 	})
 
-	group.DELETE("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("location").S("user_id").A("delete").Build(), func(c *gin.Context) {
+	group.DELETE("/:location-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeLocation).S("user_id").A("delete").Build(), func(c *gin.Context) {
 		object, ok := m.getProjectLocation(c)
 		if !ok {
 			return

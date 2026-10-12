@@ -20,7 +20,7 @@ type Config struct {
 
 type Module struct {
 	cfg         Config
-	client      *dynamic.DynamicClient
+	client      dynamic.Interface
 	middlewares []gin.HandlerFunc
 	enforcer    *casbin.Enforcer
 }

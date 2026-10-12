@@ -37,7 +37,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/zones", m.middlewares...)
 	m.registerDNSEndpointRoutes(group)
 
-	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
 			LabelSelector: "project=" + c.Param("project-id"),
 		})
@@ -62,7 +62,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("create").Build(), func(c *gin.Context) {
+	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("create").Build(), func(c *gin.Context) {
 		var dto CreteZoneDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
@@ -123,7 +123,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.DELETE("/:zone-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("delete").Build(), func(c *gin.Context) {
+	group.DELETE("/:zone-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("delete").Build(), func(c *gin.Context) {
 		err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Delete(c, c.Param("zone-id"), metav1.DeleteOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {

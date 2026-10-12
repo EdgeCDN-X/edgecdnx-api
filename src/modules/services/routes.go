@@ -27,7 +27,7 @@ var gvr = schema.GroupVersionResource{
 func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/services", m.middlewares...)
 
-	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("read").Build(), func(c *gin.Context) {
 		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
 			LabelSelector: "project=" + c.Param("project-id"),
 		})
@@ -53,7 +53,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("create").Build(), func(c *gin.Context) {
+	group.POST("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("create").Build(), func(c *gin.Context) {
 		var dto ServiceDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
@@ -233,7 +233,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.PATCH("/:service-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.PATCH("/:service-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto ServiceUpdateDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
@@ -360,7 +360,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.GET("/:service-id/status", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/:service-id/status", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("read").Build(), func(c *gin.Context) {
 		serviceId := c.Param("service-id")
 
 		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
@@ -416,7 +416,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.POST("/:service-id/keys", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.POST("/:service-id/keys", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto CreateKeyDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
@@ -498,7 +498,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.DELETE("/:service-id/keys/:key-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.DELETE("/:service-id/keys/:key-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("update").Build(), func(c *gin.Context) {
 		serviceId := c.Param("service-id")
 		keyName := c.Param("key-name")
 
@@ -568,7 +568,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.POST("/:service-id/host-alias", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.POST("/:service-id/host-alias", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto HostAliasDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 
@@ -637,7 +637,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.DELETE("/:service-id/host-alias/:alias-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("service").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.DELETE("/:service-id/host-alias/:alias-name", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("update").Build(), func(c *gin.Context) {
 		serviceId := c.Param("service-id")
 		aliasName := c.Param("alias-name")
 

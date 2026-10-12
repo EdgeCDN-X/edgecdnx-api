@@ -29,7 +29,7 @@ var healthCheckProfileGVR = schema.GroupVersionResource{
 func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/healthcheckprofiles", m.middlewares...)
 	authorize := func(action string) gin.HandlerFunc {
-		return auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("healthcheckprofile").S("user_id").A(action).Build()
+		return auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeHealthCheckProfile).S("user_id").A(action).Build()
 	}
 	group.GET("", authorize("read"), func(c *gin.Context) {
 		objects, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{

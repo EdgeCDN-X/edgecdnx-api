@@ -26,6 +26,8 @@ var gvr = schema.GroupVersionResource{
 
 func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("/projects", m.middlewares...)
+	m.registerRoleRoutes(group)
+	m.registerMemberRoutes(group)
 
 	group.GET("", func(c *gin.Context) {
 
@@ -75,7 +77,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		return
 	})
 
-	group.GET(":project-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("project").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET(":project-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeProject).S("user_id").A("read").Build(), func(c *gin.Context) {
 
 		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, c.Param("project-id"), metav1.GetOptions{})
 

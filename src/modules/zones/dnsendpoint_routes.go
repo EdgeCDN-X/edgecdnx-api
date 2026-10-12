@@ -70,7 +70,7 @@ func validateDNSEndpointRouting(spec *infrastructurev1alpha1.DNSEndpointSpec, pr
 }
 
 func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
-	group.GET("/:zone-id/dns-endpoints", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("read").Build(), func(c *gin.Context) {
+	group.GET("/:zone-id/dns-endpoints", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("read").Build(), func(c *gin.Context) {
 		zone, ok := m.getProjectZone(c)
 		if !ok {
 			return
@@ -116,7 +116,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 		c.JSON(http.StatusOK, dnsEndpoints)
 	})
 
-	group.POST("/:zone-id/dns-endpoints", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.POST("/:zone-id/dns-endpoints", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto CreateDNSEndpointDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
@@ -192,7 +192,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 		c.JSON(http.StatusCreated, createdDNSEndpoint)
 	})
 
-	group.PATCH("/:zone-id/dns-endpoints/:dns-endpoint-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.PATCH("/:zone-id/dns-endpoints/:dns-endpoint-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("update").Build(), func(c *gin.Context) {
 		var dto UpdateDNSEndpointDto
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
@@ -274,7 +274,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 		c.JSON(http.StatusOK, updatedDNSEndpoint)
 	})
 
-	group.DELETE("/:zone-id/dns-endpoints/:dns-endpoint-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R("zone").S("user_id").A("update").Build(), func(c *gin.Context) {
+	group.DELETE("/:zone-id/dns-endpoints/:dns-endpoint-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("update").Build(), func(c *gin.Context) {
 		if _, ok := m.getProjectZone(c); !ok {
 			return
 		}
