@@ -191,6 +191,67 @@ func TestDNSEndpointLifecycle(t *testing.T) {
 	}
 }
 
+func TestDNSEndpointIdentityIsImmutable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	module := newDNSEndpointTestModule(t)
+	router := gin.New()
+	module.RegisterRoutes(router)
+	path := "/project/project-a/zones/example.com/dns-endpoints"
+
+	createResponse := performJSONRequest(router, http.MethodPost, path, `{
+		"dnsName":"me.example.com",
+		"recordTTL":300,
+		"recordType":"A",
+		"targets":["192.0.2.1"]
+	}`)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create returned %d: %s", createResponse.Code, createResponse.Body.String())
+	}
+	var created infrastructurev1alpha1.DNSEndpoint
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created DNS endpoint: %v", err)
+	}
+
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "DNS name",
+			body: `{"dnsName":"you.example.com"}`,
+			want: "dnsName cannot be changed",
+		},
+		{
+			name: "record type",
+			body: `{"recordType":"AAAA"}`,
+			want: "recordType cannot be changed",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := performJSONRequest(router, http.MethodPatch, path+"/"+created.Name, test.body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("patch returned %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("patch error %q does not contain %q", response.Body.String(), test.want)
+			}
+		})
+	}
+
+	updateResponse := performJSONRequest(router, http.MethodPatch, path+"/"+created.Name, `{"recordTTL":600}`)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("updating mutable fields returned %d: %s", updateResponse.Code, updateResponse.Body.String())
+	}
+	var updated infrastructurev1alpha1.DNSEndpoint
+	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated DNS endpoint: %v", err)
+	}
+	if updated.Spec.DNSName != created.Spec.DNSName || updated.Spec.RecordType != created.Spec.RecordType || updated.Spec.RecordTTL != 600 {
+		t.Fatalf("unexpected updated endpoint: %#v", updated.Spec)
+	}
+}
+
 func TestCreateDNSEndpointValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	module := newDNSEndpointTestModule(t)
@@ -282,7 +343,7 @@ func TestWildcardDNSEndpointLifecycle(t *testing.T) {
 				t.Fatalf("persisted DNS name = %q, error = %v", got, err)
 			}
 			response = performJSONRequest(router, http.MethodPatch, path+"/"+created.Name,
-				`{"dnsName":"*.api.example.com","recordTTL":600}`)
+				fmt.Sprintf(`{"dnsName":%q,"recordTTL":600}`, dnsName))
 			if response.Code != http.StatusOK {
 				t.Fatalf("patch returned %d: %s", response.Code, response.Body.String())
 			}
@@ -290,7 +351,7 @@ func TestWildcardDNSEndpointLifecycle(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &updated); err != nil {
 				t.Fatal(err)
 			}
-			if updated.Spec.DNSName != "*.api.example.com" || updated.Spec.RecordTTL != 600 {
+			if updated.Spec.DNSName != dnsName || updated.Spec.RecordTTL != 600 {
 				t.Fatalf("unexpected updated endpoint: %#v", updated.Spec)
 			}
 		})

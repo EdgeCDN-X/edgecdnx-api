@@ -214,14 +214,16 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			return
 		}
 
-		if dto.DNSName != "" {
-			dnsEndpoint.Spec.DNSName = dto.DNSName
+		if dto.DNSName != "" && dto.DNSName != dnsEndpoint.Spec.DNSName {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "dnsName cannot be changed after creation; delete and recreate the DNS record"})
+			return
 		}
 		if dto.RecordTTL != nil {
 			dnsEndpoint.Spec.RecordTTL = *dto.RecordTTL
 		}
-		if dto.RecordType != "" {
-			dnsEndpoint.Spec.RecordType = dto.RecordType
+		if dto.RecordType != "" && dto.RecordType != dnsEndpoint.Spec.RecordType {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "recordType cannot be changed after creation; delete and recreate the DNS record"})
+			return
 		}
 		if dto.Targets != nil {
 			dnsEndpoint.Spec.Targets = dto.Targets
