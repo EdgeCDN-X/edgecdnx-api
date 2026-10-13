@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
@@ -250,5 +251,92 @@ func TestCreateSRVDNSEndpointWithServiceLabels(t *testing.T) {
 	}
 	if strings.Contains(created.Name, "_") {
 		t.Fatalf("expected Kubernetes-safe resource name, got %q", created.Name)
+	}
+}
+
+func TestWildcardDNSEndpointLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, dnsName := range []string{"*.example.com", "*.me.example.com", "*.ME.Example.COM."} {
+		t.Run(dnsName, func(t *testing.T) {
+			module := newDNSEndpointTestModule(t)
+			router := gin.New()
+			module.RegisterRoutes(router)
+			path := "/project/project-a/zones/example.com/dns-endpoints"
+			response := performJSONRequest(router, http.MethodPost, path, fmt.Sprintf(
+				`{"dnsName":%q,"recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`, dnsName))
+			if response.Code != http.StatusCreated {
+				t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
+			}
+			var created infrastructurev1alpha1.DNSEndpoint
+			if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			if created.Spec.DNSName != dnsName || !validKubernetesDNSSubdomain(created.Name) {
+				t.Fatalf("unexpected created endpoint: %#v", created)
+			}
+			stored, err := module.client.Resource(dnsEndpointGVR).Namespace(module.cfg.Namespace).Get(context.Background(), created.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("get persisted endpoint: %v", err)
+			}
+			if got, _, err := unstructured.NestedString(stored.Object, "spec", "dnsName"); err != nil || got != dnsName {
+				t.Fatalf("persisted DNS name = %q, error = %v", got, err)
+			}
+			response = performJSONRequest(router, http.MethodPatch, path+"/"+created.Name,
+				`{"dnsName":"*.api.example.com","recordTTL":600}`)
+			if response.Code != http.StatusOK {
+				t.Fatalf("patch returned %d: %s", response.Code, response.Body.String())
+			}
+			var updated infrastructurev1alpha1.DNSEndpoint
+			if err := json.Unmarshal(response.Body.Bytes(), &updated); err != nil {
+				t.Fatal(err)
+			}
+			if updated.Spec.DNSName != "*.api.example.com" || updated.Spec.RecordTTL != 600 {
+				t.Fatalf("unexpected updated endpoint: %#v", updated.Spec)
+			}
+		})
+	}
+}
+
+func TestWildcardDNSEndpointValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, dnsName := range []string{
+		"*.*.example.com", "api.*.example.com", "**.example.com", "api*.example.com",
+		"*.example.*", "*", "*..example.com", "*.other.com",
+	} {
+		t.Run(dnsName, func(t *testing.T) {
+			module := newDNSEndpointTestModule(t)
+			router := gin.New()
+			module.RegisterRoutes(router)
+			path := "/project/project-a/zones/example.com/dns-endpoints"
+			body := fmt.Sprintf(`{"dnsName":%q,"recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`, dnsName)
+			response := performJSONRequest(router, http.MethodPost, path, body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
+			}
+			response = performJSONRequest(router, http.MethodPost, path,
+				`{"dnsName":"www.example.com","recordTTL":300,"recordType":"A","targets":["192.0.2.1"]}`)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("setup returned %d: %s", response.Code, response.Body.String())
+			}
+			var created infrastructurev1alpha1.DNSEndpoint
+			if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			response = performJSONRequest(router, http.MethodPatch, path+"/"+created.Name, body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("patch returned %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestWildcardDNSNamesDoNotAllowWildcardTargets(t *testing.T) {
+	for _, recordType := range []string{"A", "AAAA", "CNAME", "TXT", "MX", "SRV", "NS"} {
+		if !validDNSEndpointDNSName("*.me.example.com", recordType) {
+			t.Errorf("wildcard owner rejected for %s", recordType)
+		}
+	}
+	if validDNSHostname("*.example.com") || validDNSEndpointTargets("SRV", []string{"10 0 443 *.example.com"}) {
+		t.Fatal("wildcard accepted as a target hostname")
 	}
 }

@@ -432,7 +432,10 @@ func validDNSEndpointDNSName(dnsName, recordType string) bool {
 	if len(labels) < 2 {
 		return false
 	}
-	for _, label := range labels {
+	for index, label := range labels {
+		if index == 0 && label == "*" {
+			continue
+		}
 		if !validDNSLabel(label, recordType == "SRV") {
 			return false
 		}
