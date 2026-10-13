@@ -23,6 +23,11 @@ import (
 
 func newRoleTestRouter(t *testing.T) (*gin.Engine, *dynamicfake.FakeDynamicClient) {
 	t.Helper()
+	return newProjectTestRouter(t, func(c *gin.Context) { c.Set("user_id", "test-user") })
+}
+
+func newProjectTestRouter(t *testing.T, setContext func(*gin.Context)) (*gin.Engine, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	project := &infrastructurev1alpha1.Project{
@@ -77,7 +82,7 @@ func newRoleTestRouter(t *testing.T) (*gin.Engine, *dynamicfake.FakeDynamicClien
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		c.Set("user_id", "test-user")
+		setContext(c)
 		c.Next()
 	})
 	module.RegisterRoutes(router)

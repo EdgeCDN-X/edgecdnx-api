@@ -60,6 +60,13 @@ func (b *AuthzBuilder) Build() gin.HandlerFunc {
 			tenant = b.StaticTenant
 		}
 
+		// API keys may only act within their own project, whatever RBAC bindings exist elsewhere.
+		if project, ok := APIKeyProject(c); ok && tenant != project {
+			logger.L().Debug("API key used outside its project", zap.String("subject", subject), zap.String("project", project), zap.String("tenant", tenant))
+			c.AbortWithStatusJSON(403, gin.H{"error": "forbidden"})
+			return
+		}
+
 		resource := b.Resource
 		action := b.Action
 		groupsStr := c.GetString("groups")

@@ -28,6 +28,7 @@ func TestResourceTypesEndpoint(t *testing.T) {
 	}
 	want := []string{
 		ResourceTypeAll,
+		ResourceTypeAPIKey,
 		ResourceTypeHealthCheckProfile,
 		ResourceTypeLocation,
 		ResourceTypePrefixList,

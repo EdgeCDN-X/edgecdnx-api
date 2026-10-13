@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/admin"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/apikeys"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/locations"
@@ -96,6 +97,14 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 					Namespace:           a.Namespace,
 					DefaultAdminProject: a.DefaultAdminProject,
 					DefaultAdminUser:    a.DefaultAdminUser,
+				})
+			},
+		},
+		{
+			Name: "APIKeys",
+			Init: func() app.Module {
+				return apikeys.New(apikeys.Config{
+					Namespace: a.Namespace,
 				})
 			},
 		},

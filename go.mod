@@ -3,7 +3,7 @@ module github.com/EdgeCDN-X/edgecdnx-api
 go 1.25.0
 
 require (
-	github.com/EdgeCDN-X/edgecdnx-controller v0.34.0
+	github.com/EdgeCDN-X/edgecdnx-controller v0.35.0
 	github.com/casbin/casbin/v3 v3.9.0
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/gin-contrib/cors v1.7.6
@@ -107,3 +107,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// replace github.com/EdgeCDN-X/edgecdnx-controller => ../edgecdnx-controller

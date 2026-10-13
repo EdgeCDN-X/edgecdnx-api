@@ -38,6 +38,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		}
 
 		projects := []infrastructurev1alpha1.Project{}
+		apiKeyProject, isAPIKey := auth.APIKeyProject(c)
 
 		for _, item := range objList.Items {
 			project := &infrastructurev1alpha1.Project{}
@@ -45,6 +46,9 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			if err != nil {
 				c.JSON(500, gin.H{"error": "internal error"})
 				return
+			}
+			if isAPIKey && project.Name != apiKeyProject {
+				continue
 			}
 
 			allowed, err := m.enforcer.Enforce(c.GetString("user_id"), project.Name, "project", "read")
@@ -98,6 +102,10 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	})
 
 	group.POST("", func(c *gin.Context) {
+		if auth.IsAPIKeyRequest(c) {
+			c.JSON(403, gin.H{"error": "API keys cannot create projects"})
+			return
+		}
 
 		var dto ProjectDto
 		if err := c.ShouldBind(&dto); err != nil {

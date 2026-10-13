@@ -53,10 +53,12 @@ const (
 	ResourceTypeLocation           = "location"
 	ResourceTypeHealthCheckProfile = "healthcheckprofile"
 	ResourceTypePrefixList         = "prefixlist"
+	ResourceTypeAPIKey             = "apikey"
 )
 
 var resourceTypes = []string{
 	ResourceTypeAll,
+	ResourceTypeAPIKey,
 	ResourceTypeHealthCheckProfile,
 	ResourceTypeLocation,
 	ResourceTypePrefixList,
@@ -86,14 +88,23 @@ type Config struct {
 	OIDCGroupPrefix   string
 }
 
+// APIKeyProjectLabel is the label linking an APIKey CR to its project.
+const APIKeyProjectLabel = "project"
+
 type Module struct {
-	cfg          Config
-	client       *dynamic.DynamicClient
-	informerChan chan struct{}
-	Informer     cache.SharedIndexInformer
-	casbinModel  model.Model
-	Adapter      persist.Adapter
-	Enforcer     *casbin.Enforcer
+	cfg            Config
+	client         *dynamic.DynamicClient
+	informerChan   chan struct{}
+	Informer       cache.SharedIndexInformer
+	APIKeyInformer cache.SharedIndexInformer
+	casbinModel    model.Model
+	Adapter        persist.Adapter
+	Enforcer       *casbin.Enforcer
+
+	// Caches used for API key authentication.
+	apiKeys  cache.Store
+	projects cache.Store
+	clock    func() time.Time
 }
 
 func (m *Module) AuthMiddleware() gin.HandlerFunc {
@@ -105,12 +116,21 @@ func (m *Module) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		if !strings.HasPrefix(authHeader, "Bearer ") {
+		scheme, tokenString, ok := parseAuthorization(authHeader)
+		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization header"})
 			return
 		}
 
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		switch scheme {
+		case authSchemeAPIKey:
+			m.handleAPIKeyAuth(c, tokenString)
+			return
+		case authSchemeBearer:
+		default:
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization header"})
+			return
+		}
 
 		// Validate with OIDC
 		idToken, err := m.cfg.verifier.Verify(c.Request.Context(), tokenString)
@@ -122,6 +142,7 @@ func (m *Module) AuthMiddleware() gin.HandlerFunc {
 		// extract claims if you need them
 		var claims map[string]interface{}
 		if err := idToken.Claims(&claims); err == nil {
+			c.Set(ContextKeyAuthMethod, AuthMethodOIDC)
 			c.Set("claims", claims)
 			c.Set("user_id", claims[m.cfg.AuthClaim])
 			// Convert groups claim array to comma-separated string. Seems like there's bug retreiving it as a slice directly from the context, maybe due to how Gin stores values.
@@ -185,6 +206,12 @@ func (m *Module) Init() error {
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
 		Resource: "projects",
+	}).Informer()
+
+	apiKeyInformer := fac.ForResource(schema.GroupVersionResource{
+		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
+		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
+		Resource: "apikeys",
 	}).Informer()
 
 	m.Adapter = adapter
@@ -266,9 +293,13 @@ func (m *Module) Init() error {
 	stop := make(chan struct{})
 	m.Informer = informer
 	m.informerChan = stop
+	m.APIKeyInformer = apiKeyInformer
+	m.projects = informer.GetStore()
+	m.apiKeys = apiKeyInformer.GetStore()
 	go informer.Run(stop)
+	go apiKeyInformer.Run(stop)
 
-	if !cache.WaitForCacheSync(stop, informer.HasSynced) {
+	if !cache.WaitForCacheSync(stop, informer.HasSynced, apiKeyInformer.HasSynced) {
 		logger.L().Error("Failed to sync informer cache")
 		return fmt.Errorf("failed to sync informer cache")
 	}
