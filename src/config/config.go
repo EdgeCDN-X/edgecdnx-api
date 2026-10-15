@@ -11,6 +11,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/locations"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/projects"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/services"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/utils"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/zones"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -80,6 +81,12 @@ type ModuleDef struct {
 
 func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 	return []ModuleDef{
+		{
+			Name: "Utils",
+			Init: func() app.Module {
+				return utils.New()
+			},
+		},
 		{
 			Name: "Admin",
 			Init: func() app.Module {
