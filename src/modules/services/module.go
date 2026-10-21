@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	Namespaced           bool
 	Namespace            string
 	ServiceBaseDomain    string
 	DefaultRouteSelector *metav1.LabelSelector
@@ -17,7 +18,7 @@ type Config struct {
 
 type Module struct {
 	cfg         Config
-	client      *dynamic.DynamicClient
+	client      dynamic.Interface
 	middlewares []gin.HandlerFunc
 	enforcer    *casbin.Enforcer
 }
@@ -26,7 +27,11 @@ func New(cfg Config) *Module {
 	return &Module{cfg: cfg}
 }
 
-func (m *Module) Shutdown() {}
+func (m *Module) scope() app.Scope {
+	return app.Scope{Namespaced: m.cfg.Namespaced, Namespace: m.cfg.Namespace}
+}
+
+func (m *Module) Shutdown() { app.CloseResourceClient(m.client) }
 
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
@@ -35,9 +40,8 @@ func (m *Module) Init() error {
 		return err
 	}
 
-	m.client = client
-
-	return nil
+	m.client, err = app.NewResourceClient(client, m.scope(), gvr)
+	return err
 }
 
 func (m *Module) SetMiddlewares(middlewares ...gin.HandlerFunc) {

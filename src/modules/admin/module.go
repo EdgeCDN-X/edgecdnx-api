@@ -10,7 +10,8 @@ import (
 )
 
 type Config struct {
-	Namespace string
+	Namespaced bool
+	Namespace  string
 
 	DefaultAdminProject string
 	DefaultAdminUser    string
@@ -29,7 +30,11 @@ func New(cfg Config) *Module {
 	return &Module{cfg: cfg}
 }
 
-func (m *Module) Shutdown() {}
+func (m *Module) scope() app.Scope {
+	return app.Scope{Namespaced: m.cfg.Namespaced, Namespace: m.cfg.Namespace}
+}
+
+func (m *Module) Shutdown() { app.CloseResourceClient(m.dynClient) }
 
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
@@ -43,7 +48,10 @@ func (m *Module) Init() error {
 		return err
 	}
 
-	m.dynClient = dynClient
+	m.dynClient, err = app.NewResourceClient(dynClient, m.scope(), prefixListGVR, zoneGVR, locationGVR)
+	if err != nil {
+		return err
+	}
 	m.client = client
 
 	return nil

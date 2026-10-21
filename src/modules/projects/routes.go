@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var gvr = schema.GroupVersionResource{
@@ -31,7 +33,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 	group.GET("", func(c *gin.Context) {
 
-		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{})
+		objList, err := app.ListResources(c, m.client, gvr, m.scope().WatchNamespace())
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list projects: " + err.Error()})
 			return
@@ -41,6 +43,9 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		apiKeyProject, isAPIKey := auth.APIKeyProject(c)
 
 		for _, item := range objList.Items {
+			if m.cfg.Namespaced && item.GetName() != item.GetNamespace() {
+				continue
+			}
 			project := &infrastructurev1alpha1.Project{}
 			err = runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, project)
 			if err != nil {
@@ -83,7 +88,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 	group.GET(":project-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeProject).S("user_id").A("read").Build(), func(c *gin.Context) {
 
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, c.Param("project-id"), metav1.GetOptions{})
+		obj, err := m.client.Resource(gvr).Namespace(m.scope().ResourceNamespace(c.Param("project-id"))).Get(c, c.Param("project-id"), metav1.GetOptions{})
 
 		if err != nil {
 			c.JSON(404, gin.H{"error": "project not found"})
@@ -126,18 +131,45 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 }
 
 func (m *Module) createProject(ctx context.Context, user_id string, created_by string, dto ProjectDto) (infrastructurev1alpha1.Project, int, error) {
-	slug.MaxLength = 63
 	name := slug.Make(dto.Name)
+	if len(name) > 63 {
+		name = strings.TrimRight(name[:63], "-")
+	}
+	if problems := validation.IsDNS1123Label(name); len(problems) != 0 {
+		return infrastructurev1alpha1.Project{}, 400, fmt.Errorf("invalid project name: %v", problems)
+	}
+	namespace := m.scope().ResourceNamespace(name)
 
-	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
+	obj, err := m.client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if obj != nil {
 		// Project with this name already exists
-		return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("project with the same name already exists. Projects must have unique names within the platform")
+		return infrastructurev1alpha1.Project{}, 409, apierrors.NewAlreadyExists(gvr.GroupResource(), name)
 	}
 
 	if err != nil && !apierrors.IsNotFound(err) {
 		// An error other than "not found" occurred
 		return infrastructurev1alpha1.Project{}, 500, fmt.Errorf("failed to check for existing project: %w", err)
+	}
+	if m.cfg.Namespaced {
+		namespaces := m.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"})
+		managedNamespace := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1", "kind": "Namespace",
+			"metadata": map[string]interface{}{"name": namespace, "labels": map[string]interface{}{
+				"app.kubernetes.io/managed-by": "edgecdnx-api", "edgecdnx.com/project-name": name,
+			}},
+		}}
+		if _, err := namespaces.Create(ctx, managedNamespace, metav1.CreateOptions{}); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return infrastructurev1alpha1.Project{}, 500, fmt.Errorf("failed to create project namespace: %w", err)
+			}
+			existing, err := namespaces.Get(ctx, namespace, metav1.GetOptions{})
+			if err != nil {
+				return infrastructurev1alpha1.Project{}, 500, fmt.Errorf("failed to inspect project namespace: %w", err)
+			}
+			if existing.GetLabels()["app.kubernetes.io/managed-by"] != "edgecdnx-api" || existing.GetLabels()["edgecdnx.com/project-name"] != name || existing.GetDeletionTimestamp() != nil {
+				return infrastructurev1alpha1.Project{}, 409, fmt.Errorf("namespace %q already exists and cannot be adopted", namespace)
+			}
+		}
 	}
 
 	project := &infrastructurev1alpha1.Project{
@@ -146,7 +178,8 @@ func (m *Module) createProject(ctx context.Context, user_id string, created_by s
 			Kind:       "Project",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 			Labels: map[string]string{
 				"edgecdnx.com/project-name": name,
 				"edgecdnx.com/created-by":   created_by,
@@ -207,15 +240,16 @@ func (m *Module) createProject(ctx context.Context, user_id string, created_by s
 		Object: objMap,
 	}
 
-	ns := m.cfg.Namespace
-
 	createdObj, err := m.client.Resource(schema.GroupVersionResource{
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
 		Resource: "projects",
-	}).Namespace(ns).Create(ctx, &projectUnstructured, metav1.CreateOptions{})
+	}).Namespace(namespace).Create(ctx, &projectUnstructured, metav1.CreateOptions{})
 
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return infrastructurev1alpha1.Project{}, 409, err
+		}
 		if apierrors.IsBadRequest(err) {
 			return infrastructurev1alpha1.Project{}, 409, err
 		}

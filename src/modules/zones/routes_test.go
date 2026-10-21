@@ -16,6 +16,7 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
 	"github.com/gin-gonic/gin"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,7 +52,7 @@ func newDNSEndpointTestModule(t *testing.T) *Module {
 			Namespace: "edgecdnx",
 			Labels:    map[string]string{"project": "project-a"},
 		},
-		Spec: infrastructurev1alpha1.ZoneSpec{Zone: "example.com"},
+		Spec: infrastructurev1alpha1.ZoneSpec{Project: &corev1.LocalObjectReference{Name: "project-a"}, Zone: "example.com"},
 	}
 	return &Module{
 		cfg:      Config{Namespace: "edgecdnx"},

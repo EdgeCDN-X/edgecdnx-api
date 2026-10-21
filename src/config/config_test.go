@@ -2,6 +2,44 @@ package config
 
 import "testing"
 
+func TestServicesFeatureGate(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		gates   string
+		enabled bool
+	}{
+		{"disabled by default", "", false},
+		{"enabled explicitly", "cachingreconciler", true},
+		{"comma-separated with whitespace", "other, cachingreconciler ,another", true},
+		{"unrelated gate", "other", false},
+		{"not a substring match", "notcachingreconciler", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := AppConfig{FeatureGates: test.gates}
+			modules := cfg.GetAuthenticatedModules()
+			found := false
+			for _, module := range modules {
+				if module.Name == "Services" {
+					found = true
+					if module.Init() == nil {
+						t.Fatal("enabled Services module must have a constructor")
+					}
+				}
+			}
+			if found != test.enabled {
+				t.Fatalf("Services registered = %v, want %v", found, test.enabled)
+			}
+			wantCount := 6
+			if test.enabled {
+				wantCount++
+			}
+			if len(modules) != wantCount {
+				t.Fatalf("other modules must remain enabled: got %d, want %d", len(modules), wantCount)
+			}
+		})
+	}
+}
+
 func TestParseDefaultRouteSelector(t *testing.T) {
 	selector, err := ParseDefaultRouteSelector(`{"matchLabels":{"project":"acme"},"matchExpressions":[{"key":"edgecdnx.com/route-kind","operator":"In","values":["static"]}]}`)
 	if err != nil {

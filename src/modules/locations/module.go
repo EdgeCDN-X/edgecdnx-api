@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	Namespace string
+	Namespaced bool
+	Namespace  string
 }
 
 type Module struct {
@@ -24,7 +25,11 @@ func New(cfg Config) *Module {
 	return &Module{cfg: cfg}
 }
 
-func (m *Module) Shutdown() {}
+func (m *Module) scope() app.Scope {
+	return app.Scope{Namespaced: m.cfg.Namespaced, Namespace: m.cfg.Namespace}
+}
+
+func (m *Module) Shutdown() { app.CloseResourceClient(m.client) }
 
 func (m *Module) Init() error {
 	logger.L().Info("Initializing module")
@@ -32,8 +37,8 @@ func (m *Module) Init() error {
 	if err != nil {
 		return err
 	}
-	m.client = client
-	return nil
+	m.client, err = app.NewResourceClient(client, m.scope(), locationGVR, healthCheckProfileGVR)
+	return err
 }
 
 func (m *Module) SetMiddlewares(middlewares ...gin.HandlerFunc) {

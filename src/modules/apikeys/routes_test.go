@@ -165,8 +165,8 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stored API key: %v", err)
 	}
-	if stored.Labels[projectLabel] != "project-a" || stored.Spec.ProjectRef == nil || stored.Spec.ProjectRef.Name != "project-a" {
-		t.Fatalf("expected project label and projectRef, got labels=%v projectRef=%v", stored.Labels, stored.Spec.ProjectRef)
+	if stored.Labels[projectLabel] != "project-a" || stored.Spec.Project == nil || stored.Spec.Project.Name != "project-a" {
+		t.Fatalf("expected project label and project, got labels=%v project=%v", stored.Labels, stored.Spec.Project)
 	}
 	if stored.Spec.Credential.Digest != auth.APIKeyDigest(created.Token) ||
 		stored.Spec.Credential.Algorithm != "sha256" || stored.Spec.Credential.FormatVersion != "v1" {

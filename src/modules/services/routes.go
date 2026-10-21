@@ -11,6 +11,7 @@ import (
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"github.com/gosimple/slug"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,9 +29,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group := r.Group("project/:project-id/services", m.middlewares...)
 
 	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("read").Build(), func(c *gin.Context) {
-		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: "project=" + c.Param("project-id"),
-		})
+		objList, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).List(c, metav1.ListOptions{})
 
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list services: " + err.Error()})
@@ -61,9 +60,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		}
 
 		services := &infrastructurev1alpha1.ServiceList{}
-		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: "project=" + c.Param("project-id"),
-		})
+		objList, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).List(c, metav1.ListOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list services: " + err.Error()})
 			return
@@ -97,12 +94,13 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: name + "-",
-				Namespace:    m.cfg.Namespace,
+				Namespace:    m.scope().ResourceNamespace(c.Param("project-id")),
 				Labels: map[string]string{
 					"project": c.Param("project-id"),
 				},
 			},
 			Spec: infrastructurev1alpha1.ServiceSpec{
+				Project:    &corev1.LocalObjectReference{Name: c.Param("project-id")},
 				Name:       dto.Name,
 				Domain:     fmt.Sprintf("%s.%s", generatedDomainHost, m.cfg.ServiceBaseDomain),
 				OriginType: dto.OriginType,
@@ -204,9 +202,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		ns := m.cfg.Namespace
-
-		createdObj, err := m.client.Resource(gvr).Namespace(ns).Create(c, &serviceUnstructured, metav1.CreateOptions{})
+		createdObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Create(c, &serviceUnstructured, metav1.CreateOptions{})
 		if err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				c.JSON(409, gin.H{"error": "service with the same name already exists. Services must have unique names within the platform."})
@@ -242,7 +238,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 
 		serviceId := c.Param("service-id")
 
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -343,7 +339,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to update service: " + err.Error()})
 			return
@@ -363,7 +359,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	group.GET("/:service-id/status", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeService).S("user_id").A("read").Build(), func(c *gin.Context) {
 		serviceId := c.Param("service-id")
 
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -384,7 +380,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Resource: "certificates",
 		}
 
-		obj, err = m.client.Resource(certgvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err = m.client.Resource(certgvr).Namespace(m.scope().ResourceNamespace(c.Param("project-id"))).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				c.JSON(500, gin.H{"error": "failed to retrieve certificate: " + err.Error()})
@@ -401,7 +397,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Resource: "applicationsets",
 		}
 
-		obj, err = m.client.Resource(appsetgvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err = m.client.Resource(appsetgvr).Namespace(m.scope().ResourceNamespace(c.Param("project-id"))).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				c.JSON(500, gin.H{"error": "failed to retrieve applicationset: " + err.Error()})
@@ -432,7 +428,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		serviceId := c.Param("service-id")
 
 		// Check if service exists
-		_, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		_, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -456,7 +452,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		}
 
 		// Create the new key
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
 			return
@@ -481,7 +477,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to update service with new key: " + err.Error()})
 			return
@@ -503,7 +499,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		keyName := c.Param("key-name")
 
 		// Check if service exists
-		_, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		_, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -513,7 +509,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			return
 		}
 
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to retrieve service: " + err.Error()})
 			return
@@ -551,7 +547,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to update service after deleting key: " + err.Error()})
 			return
@@ -581,7 +577,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		serviceId := c.Param("service-id")
 
 		// Check if service exists
-		service, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		service, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -620,7 +616,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to add hostAlias to service: " + err.Error()})
 			return
@@ -642,7 +638,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 		aliasName := c.Param("alias-name")
 
 		// Check if service exists
-		obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, serviceId, metav1.GetOptions{})
+		obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, serviceId, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				c.JSON(404, gin.H{"error": "service not found"})
@@ -684,7 +680,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			Object: objMap,
 		}
 
-		updatedObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Update(c, &serviceUnstructured, metav1.UpdateOptions{})
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to update service after removing host Alias: " + err.Error()})
 			return

@@ -19,7 +19,10 @@ func main() {
 	// Define flags
 	production := flag.Bool("production", false, "run in production mode")
 	listen := flag.String("listen", ":5555", "Address and port to listen at")
-	namespace := flag.String("namespace", "edgecdnx", "Kubernetes namespace to watch for resources")
+	namespace := flag.String("namespace", "edgecdnx", "Shared namespace when --namespaced=false; alias for --target-namespace")
+	flag.StringVar(namespace, "target-namespace", "edgecdnx", "Shared tenant namespace when --namespaced=false")
+	namespaced := flag.Bool("namespaced", true, "Place each project and its resources in a dedicated namespace")
+	featureGates := flag.String("feature-gates", "", "Comma-separated list of enabled feature gates; cachingreconciler enables the Services module")
 	prometheus_endpoint := flag.String("prometheus_endpoint", "", "Prometheus HTTP endpoint, for example http://prometheus:9090")
 	healthcheck_db_dsn := flag.String("healthcheck_db_dsn", os.Getenv("HEALTHCHECK_DB_DSN"), "PostgreSQL/TimescaleDB connection string for healthcheck results, e.g. postgres://user:pass@host:5432/app?sslmode=disable (defaults to $HEALTHCHECK_DB_DSN)")
 	auth_user_claim := flag.String("auth_user_claim", "email", "OIDC claim to use as the user identifier")
@@ -35,6 +38,9 @@ func main() {
 	oidc_group_prefix := flag.String("oidc_group_prefix", "oidc-", "Prefix to add to OIDC groups when creating Casbin policies")
 
 	flag.Parse()
+	if err := (app.Scope{Namespaced: *namespaced, Namespace: *namespace}).Validate(); err != nil {
+		panic(err)
+	}
 
 	defaultRouteSelector, err := config.ParseDefaultRouteSelector(*default_route_selector)
 	if err != nil {
@@ -45,6 +51,8 @@ func main() {
 		Production:           *production,
 		Listen:               *listen,
 		Namespace:            *namespace,
+		Namespaced:           *namespaced,
+		FeatureGates:         *featureGates,
 		PrometheusEndpoint:   *prometheus_endpoint,
 		CorsAllowOrigins:     strings.Split(*cors_allow_origins, ","),
 		CorsAllowedMethods:   strings.Split(*cors_allowed_methods, ","),
@@ -78,6 +86,7 @@ func main() {
 	// Register Auth module. This exposes our Auth middleware
 	authModule := auth.New(auth.Config{
 		Namespace:         appcfg.Namespace,
+		Namespaced:        appcfg.Namespaced,
 		AuthClaim:         *auth_user_claim,
 		GroupsClaim:       *auth_groups_claim,
 		OIDCGroupPrefix:   appcfg.OIDCGroupPrefix,

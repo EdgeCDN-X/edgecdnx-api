@@ -12,7 +12,6 @@ import (
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -145,7 +144,7 @@ func (m *Module) buildLocationHealthResponse(ctx context.Context, queryResponse 
 }
 
 func (m *Module) listLocations(ctx context.Context) ([]infrastructurev1alpha1.Location, error) {
-	objList, err := m.dynClient.Resource(locationGVR).Namespace(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
+	objList, err := app.ListResources(ctx, m.dynClient, locationGVR, m.scope().WatchNamespace())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list locations: %w", err)
 	}

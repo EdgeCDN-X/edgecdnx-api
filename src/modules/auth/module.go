@@ -82,6 +82,7 @@ type Config struct {
 	verifier          *oidc.IDTokenVerifier
 	authMiddleware    gin.HandlerFunc
 	Namespace         string
+	Namespaced        bool
 	AuthClaim         string
 	GroupsClaim       string
 	OIDCGroupMappings []OIDCGroupMapping
@@ -164,6 +165,10 @@ func New(cfg Config) *Module {
 	return &Module{cfg: cfg}
 }
 
+func (m *Module) scope() app.Scope {
+	return app.Scope{Namespaced: m.cfg.Namespaced, Namespace: m.cfg.Namespace}
+}
+
 func (m *Module) Shutdown() {
 	logger.L().Info("Shutting down informer")
 	close(m.informerChan)
@@ -201,7 +206,7 @@ func (m *Module) Init() error {
 	}
 
 	m.client = client
-	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, m.cfg.Namespace, nil)
+	fac := dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, 60*time.Minute, m.scope().WatchNamespace(), nil)
 	informer := fac.ForResource(schema.GroupVersionResource{
 		Group:    infrastructurev1alpha1.SchemeGroupVersion.Group,
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
@@ -213,80 +218,26 @@ func (m *Module) Init() error {
 		Version:  infrastructurev1alpha1.SchemeGroupVersion.Version,
 		Resource: "apikeys",
 	}).Informer()
+	if err := apiKeyInformer.AddIndexers(cache.Indexers{app.ProjectIndex: app.ProjectIndexFunc, app.ResourceNameIndex: app.ResourceNameIndexFunc}); err != nil {
+		return fmt.Errorf("index API keys: %w", err)
+	}
 
 	m.Adapter = adapter
 	m.Enforcer, err = casbin.NewEnforcer(m.casbinModel, m.Adapter)
+	if err != nil {
+		return err
+	}
 
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
-			p_raw, ok := obj.(*unstructured.Unstructured)
-			if !ok {
-				logger.L().Error("Failed to cast added project to Unstructured")
-				return
-			}
-
-			project := &infrastructurev1alpha1.Project{}
-			err := runtime.DefaultUnstructuredConverter.FromUnstructured(p_raw.Object, project)
-			if err != nil {
-				logger.L().Error("Failed to convert added project from Unstructured", zap.Error(err))
-				return
-			}
-
-			for _, r := range project.Spec.Rbac.Rules {
-				logger.L().Debug("Adding policy", zap.String("sub", r.V0), zap.String("dom", r.V1), zap.String("res", r.V2), zap.String("act", r.V3))
-				m.Enforcer.AddPolicy(r.V0, r.V1, r.V2, r.V3)
-			}
-
-			for _, g := range project.Spec.Rbac.Groups {
-				logger.L().Debug("Adding grouping policy", zap.String("user", g.V0), zap.String("role", g.V1), zap.String("domain", g.V2))
-				m.Enforcer.AddGroupingPolicy(g.V0, g.V1, g.V2)
-			}
+			m.applyProjectPolicies(obj, false)
 		},
 		UpdateFunc: func(oldObj, newObj any) {
-			old_raw, ok := oldObj.(*unstructured.Unstructured)
-			if !ok {
-				logger.L().Error("Failed to cast old project to Unstructured")
-				return
-			}
-			new_raw, ok := newObj.(*unstructured.Unstructured)
-			if !ok {
-				logger.L().Error("Failed to cast new project to Unstructured")
-				return
-			}
-
-			oldProject := &infrastructurev1alpha1.Project{}
-			err := runtime.DefaultUnstructuredConverter.FromUnstructured(old_raw.Object, oldProject)
-			if err != nil {
-				logger.L().Error("Failed to convert old project from Unstructured", zap.Error(err))
-				return
-			}
-
-			newProject := &infrastructurev1alpha1.Project{}
-			err = runtime.DefaultUnstructuredConverter.FromUnstructured(new_raw.Object, newProject)
-			if err != nil {
-				logger.L().Error("Failed to convert new project from Unstructured", zap.Error(err))
-				return
-			}
-
-			// Remove old policies
-			for _, r := range oldProject.Spec.Rbac.Rules {
-				logger.L().Debug("Removing policy", zap.String("sub", r.V0), zap.String("dom", r.V1), zap.String("res", r.V2), zap.String("act", r.V3))
-				m.Enforcer.RemovePolicy(r.V0, r.V1, r.V2, r.V3)
-			}
-			for _, g := range oldProject.Spec.Rbac.Groups {
-				logger.L().Debug("Removing grouping policy", zap.String("user", g.V0), zap.String("role", g.V1), zap.String("domain", g.V2))
-				m.Enforcer.RemoveGroupingPolicy(g.V0, g.V1, g.V2)
-			}
-
-			// Add new policies
-			for _, r := range newProject.Spec.Rbac.Rules {
-				logger.L().Debug("Adding policy", zap.String("sub", r.V0), zap.String("dom", r.V1), zap.String("res", r.V2), zap.String("act", r.V3))
-				m.Enforcer.AddPolicy(r.V0, r.V1, r.V2, r.V3)
-			}
-			for _, g := range newProject.Spec.Rbac.Groups {
-				logger.L().Debug("Adding grouping policy", zap.String("user", g.V0), zap.String("role", g.V1), zap.String("domain", g.V2))
-				m.Enforcer.AddGroupingPolicy(g.V0, g.V1, g.V2)
-			}
+			m.applyProjectPolicies(oldObj, true)
+			m.applyProjectPolicies(newObj, false)
+		},
+		DeleteFunc: func(obj any) {
+			m.applyProjectPolicies(obj, true)
 		},
 	})
 
@@ -323,6 +274,53 @@ func (m *Module) Init() error {
 	}
 
 	return nil
+}
+
+func (m *Module) applyProjectPolicies(object any, remove bool) {
+	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
+		object = tombstone.Obj
+	}
+	resource, ok := object.(*unstructured.Unstructured)
+	if !ok {
+		logger.L().Error("Unexpected Project informer object", zap.Any("object", object))
+		return
+	}
+	project := &infrastructurev1alpha1.Project{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(resource.Object, project); err != nil {
+		logger.L().Error("Failed to convert Project", zap.Error(err))
+		return
+	}
+	if project.Name == "" || project.Namespace != m.scope().ResourceNamespace(project.Name) {
+		return
+	}
+	for _, rule := range project.Spec.Rbac.Rules {
+		if rule.PType != "p" || rule.V1 != project.Name {
+			continue
+		}
+		var err error
+		if remove {
+			_, err = m.Enforcer.RemovePolicy(rule.V0, rule.V1, rule.V2, rule.V3)
+		} else {
+			_, err = m.Enforcer.AddPolicy(rule.V0, rule.V1, rule.V2, rule.V3)
+		}
+		if err != nil {
+			logger.L().Error("Failed to synchronize Project policy", zap.String("project", project.Name), zap.Error(err))
+		}
+	}
+	for _, group := range project.Spec.Rbac.Groups {
+		if group.PType != "g" || group.V2 != project.Name {
+			continue
+		}
+		var err error
+		if remove {
+			_, err = m.Enforcer.RemoveGroupingPolicy(group.V0, group.V1, group.V2)
+		} else {
+			_, err = m.Enforcer.AddGroupingPolicy(group.V0, group.V1, group.V2)
+		}
+		if err != nil {
+			logger.L().Error("Failed to synchronize Project group", zap.String("project", project.Name), zap.Error(err))
+		}
+	}
 }
 
 func (a *Module) SetMiddlewares(middlewares ...gin.HandlerFunc) {

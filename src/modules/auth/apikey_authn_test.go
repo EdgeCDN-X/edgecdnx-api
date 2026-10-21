@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
@@ -117,7 +118,7 @@ func (f *apiKeyFixture) addKey(t *testing.T, project string, mutate func(*infras
 		},
 		Spec: infrastructurev1alpha1.APIKeySpec{
 			DisplayName: "ci",
-			ProjectRef:  &corev1.LocalObjectReference{Name: project},
+			Project:     &corev1.LocalObjectReference{Name: project},
 			Credential: infrastructurev1alpha1.CredentialSpec{
 				FormatVersion: APIKeyFormatVersion,
 				Algorithm:     APIKeyDigestAlgorithm,
@@ -188,6 +189,70 @@ func TestAPIKeyNeverExpires(t *testing.T) {
 	}
 }
 
+func TestAPIKeyNamespacedLookup(t *testing.T) {
+	fixture := newAPIKeyFixture(t)
+	fixture.module.cfg.Namespaced = true
+	fixture.apiKeys = cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{app.ResourceNameIndex: app.ResourceNameIndexFunc})
+	fixture.module.apiKeys = fixture.apiKeys
+	for _, object := range fixture.projects.List() {
+		resource := object.(*unstructured.Unstructured).DeepCopy()
+		if err := fixture.projects.Delete(object); err != nil {
+			t.Fatal(err)
+		}
+		resource.SetNamespace(resource.GetName())
+		if err := fixture.projects.Add(resource); err != nil {
+			t.Fatal(err)
+		}
+	}
+	credential, key := fixture.addKey(t, "project-a", func(key *infrastructurev1alpha1.APIKey) {
+		key.Namespace = "project-a"
+		key.Labels = nil
+	})
+	if response := fixture.do(http.MethodGet, "/project/project-a/services", "ApiKey "+credential.Token); response.Code != http.StatusOK {
+		t.Fatalf("namespaced key lookup failed: %d %s", response.Code, response.Body.String())
+	}
+	duplicate := key.DeepCopy()
+	duplicate.Namespace = "project-b"
+	duplicate.Spec.Project.Name = "project-b"
+	duplicate.Spec.Credential.Digest = "different-secret"
+	if err := fixture.apiKeys.Add(toUnstructuredT(t, duplicate)); err != nil {
+		t.Fatal(err)
+	}
+	if response := fixture.do(http.MethodGet, "/project/project-a/services", "ApiKey "+credential.Token); response.Code != http.StatusOK {
+		t.Fatal("unrelated key ID collision must not select another tenant")
+	}
+	duplicate.Spec.Credential.Digest = key.Spec.Credential.Digest
+	if err := fixture.apiKeys.Update(toUnstructuredT(t, duplicate)); err != nil {
+		t.Fatal(err)
+	}
+	if response := fixture.do(http.MethodGet, "/project/project-a/services", "ApiKey "+credential.Token); response.Code != http.StatusUnauthorized {
+		t.Fatalf("ambiguous credentials must fail closed, got %d", response.Code)
+	}
+}
+
+func TestProjectPoliciesStayWithinTenant(t *testing.T) {
+	fixture := newAPIKeyFixture(t)
+	project := &infrastructurev1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "project-a", Namespace: testNamespace},
+		Spec: infrastructurev1alpha1.ProjectSpec{Rbac: infrastructurev1alpha1.RBACSpec{Rules: []infrastructurev1alpha1.RuleSpec{
+			{PType: "p", V0: "actor", V1: "project-a", V2: "service", V3: "read"},
+			{PType: "p", V0: "actor", V1: "project-b", V2: "service", V3: "read"},
+		}}},
+	}
+	object := toUnstructuredT(t, project)
+	fixture.module.applyProjectPolicies(object, false)
+	if allowed, err := fixture.module.Enforcer.Enforce("actor", "project-a", "service", "read"); err != nil || !allowed {
+		t.Fatalf("own-tenant rule was not loaded: %v", err)
+	}
+	if allowed, err := fixture.module.Enforcer.Enforce("actor", "project-b", "service", "read"); err != nil || allowed {
+		t.Fatalf("cross-tenant rule was loaded: %v", err)
+	}
+	fixture.module.applyProjectPolicies(cache.DeletedFinalStateUnknown{Obj: object}, true)
+	if allowed, err := fixture.module.Enforcer.Enforce("actor", "project-a", "service", "read"); err != nil || allowed {
+		t.Fatalf("deleted Project retained authorization: %v", err)
+	}
+}
+
 func TestAPIKeyRejections(t *testing.T) {
 	f := newAPIKeyFixture(t)
 	valid, _ := f.addKey(t, "project-a", nil)
@@ -198,7 +263,7 @@ func TestAPIKeyRejections(t *testing.T) {
 	wrongFormat, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) { k.Spec.Credential.FormatVersion = "v0" })
 	staleOwner, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) { k.OwnerReferences[0].UID = "old-uid" })
 	labelMismatch, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) { k.Labels[APIKeyProjectLabel] = "project-b" })
-	noProject, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) { k.Spec.ProjectRef = nil })
+	noProject, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) { k.Spec.Project = nil })
 	deleting, _ := f.addKey(t, "project-a", func(k *infrastructurev1alpha1.APIKey) {
 		now := metav1.NewTime(f.now)
 		k.DeletionTimestamp = &now
@@ -220,8 +285,7 @@ func TestAPIKeyRejections(t *testing.T) {
 		{"expired", "ApiKey " + expired.Token},
 		{"unsupported format", "ApiKey " + wrongFormat.Token},
 		{"recreated project", "ApiKey " + staleOwner.Token},
-		{"label mismatch", "ApiKey " + labelMismatch.Token},
-		{"missing projectRef", "ApiKey " + noProject.Token},
+		{"missing project", "ApiKey " + noProject.Token},
 		{"being deleted", "ApiKey " + deleting.Token},
 		{"project missing", "ApiKey " + orphan.Token},
 		{"missing credentials", "ApiKey "},
@@ -237,6 +301,9 @@ func TestAPIKeyRejections(t *testing.T) {
 	}
 
 	// A valid key still works after all rejections.
+	if response := f.do(http.MethodGet, "/project/project-a/services", "ApiKey "+labelMismatch.Token); response.Code != http.StatusOK {
+		t.Fatalf("labels must not override spec.project ownership, got %d", response.Code)
+	}
 	if response := f.do(http.MethodGet, "/project/project-a/services", "ApiKey "+valid.Token); response.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}

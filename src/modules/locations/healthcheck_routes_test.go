@@ -43,7 +43,7 @@ func seedLocationWithNodes(t *testing.T, module *Module) {
 			Name: "fra1-c1", Namespace: module.cfg.Namespace,
 			Labels: map[string]string{locationProjectLabel: "project-a"},
 		},
-		Spec: infrastructurev1alpha1.LocationSpec{NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{{
+		Spec: infrastructurev1alpha1.LocationSpec{Project: &corev1.LocalObjectReference{Name: "project-a"}, NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{{
 			Name: "nginx", Flavor: "default", HealthCheck: &corev1.LocalObjectReference{Name: "default"},
 			Nodes: []infrastructurev1alpha1.NodeSpec{{Name: "n2", Ipv4: "74.220.31.184"}, {Name: "n1", Ipv4: "74.220.31.183"}, {Name: "n3"}},
 		}}},
@@ -65,7 +65,7 @@ func seedActiveProfile(t *testing.T, module *Module, name, projectID string, pro
 			Name: name, Namespace: module.cfg.Namespace,
 			Labels: map[string]string{locationProjectLabel: projectID},
 		},
-		Spec: infrastructurev1alpha1.HealthCheckProfileSpec{Probes: probes},
+		Spec: infrastructurev1alpha1.HealthCheckProfileSpec{Project: &corev1.LocalObjectReference{Name: projectID}, Probes: probes},
 	}
 	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(profile)
 	if err != nil {
@@ -297,7 +297,7 @@ func TestActiveLocationChecksUseNodeProfilesAndCurrentTargets(t *testing.T) {
 	})
 	location := infrastructurev1alpha1.Location{
 		ObjectMeta: metav1.ObjectMeta{Namespace: module.cfg.Namespace, Labels: map[string]string{locationProjectLabel: "project-a"}},
-		Spec: infrastructurev1alpha1.LocationSpec{NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{
+		Spec: infrastructurev1alpha1.LocationSpec{Project: &corev1.LocalObjectReference{Name: "project-a"}, NodeGroups: []infrastructurev1alpha1.NodeGroupSpec{
 			{HealthCheck: &corev1.LocalObjectReference{Name: "group"}, Nodes: []infrastructurev1alpha1.NodeSpec{
 				{Name: "inherited", Ipv4: "1.2.3.4", Ipv6: "::1"},
 				{Name: "overridden", Ipv4: "1.2.3.5", HealthCheck: &corev1.LocalObjectReference{Name: "override"}},

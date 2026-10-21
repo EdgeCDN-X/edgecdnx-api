@@ -16,6 +16,7 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
 	"github.com/gin-gonic/gin"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -66,9 +67,10 @@ func performJSONRequest(router http.Handler, method, path, body string) *httptes
 func seedTestLocation(t *testing.T, module *Module, name, projectID string) {
 	t.Helper()
 	location := &infrastructurev1alpha1.Location{
+		Spec:     infrastructurev1alpha1.LocationSpec{Project: &corev1.LocalObjectReference{Name: projectID}},
 		TypeMeta: metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "Location"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name, Namespace: module.cfg.Namespace,
+			Name: name, Namespace: module.scope().ResourceNamespace(projectID),
 			Labels: map[string]string{locationProjectLabel: projectID},
 		},
 	}
@@ -76,8 +78,43 @@ func seedTestLocation(t *testing.T, module *Module, name, projectID string) {
 	if err != nil {
 		t.Fatalf("convert test location: %v", err)
 	}
-	if _, err := module.client.Resource(locationGVR).Namespace(module.cfg.Namespace).Create(context.Background(), &unstructured.Unstructured{Object: object}, metav1.CreateOptions{}); err != nil {
+	if _, err := module.client.Resource(locationGVR).Namespace(module.scope().ResourceNamespace(projectID)).Create(context.Background(), &unstructured.Unstructured{Object: object}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("seed location: %v", err)
+	}
+}
+
+func TestLocationNamespacedIsolation(t *testing.T) {
+	module := newLocationTestModule(t)
+	module.cfg.Namespaced = true
+	seedTestLocation(t, module, "owned", "project-a")
+	seedTestLocation(t, module, "foreign", "project-b")
+	resource := module.client.Resource(locationGVR).Namespace("project-a")
+	owned, err := resource.Get(context.Background(), "owned", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned.SetLabels(map[string]string{locationProjectLabel: "project-b"})
+	if _, err := resource.Update(context.Background(), owned, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	module.RegisterRoutes(router)
+	response := performJSONRequest(router, http.MethodGet, "/project/project-a/locations", "")
+	var locations []infrastructurev1alpha1.Location
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &locations) != nil || len(locations) != 1 || locations[0].Name != "owned" {
+		t.Fatalf("namespaced list must follow spec.project, got %d %s", response.Code, response.Body.String())
+	}
+	response = performJSONRequest(router, http.MethodGet, "/project/project-a/locations/foreign", "")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("foreign namespace must be inaccessible, got %d", response.Code)
+	}
+	response = performJSONRequest(router, http.MethodPost, "/project/project-a/locations", `{"name":"created"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("namespaced create failed: %d %s", response.Code, response.Body.String())
+	}
+	created, err := resource.Get(context.Background(), "created", metav1.GetOptions{})
+	if err != nil || !module.scope().Owns(created, "project-a") {
+		t.Fatalf("created resource is in the wrong tenant: %v", err)
 	}
 }
 

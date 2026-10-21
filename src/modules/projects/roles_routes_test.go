@@ -2,7 +2,10 @@ package projects
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -14,11 +17,14 @@ import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
 	"github.com/gin-gonic/gin"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func newRoleTestRouter(t *testing.T) (*gin.Engine, *dynamicfake.FakeDynamicClient) {
@@ -131,6 +137,80 @@ func TestRoleCRUD(t *testing.T) {
 	assertNotContains(t, updatedProject.Spec.Rbac.Groups, infrastructurev1alpha1.RuleSpec{
 		PType: "g", V0: "member", V1: "auditor", V2: "demo",
 	})
+}
+
+func TestProjectPlacement(t *testing.T) {
+	for _, namespaced := range []bool{true, false} {
+		t.Run(fmt.Sprint(namespaced), func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			assertNoError(t, corev1.AddToScheme(scheme))
+			assertNoError(t, infrastructurev1alpha1.AddToScheme(scheme))
+			client := dynamicfake.NewSimpleDynamicClient(scheme)
+			module := New(Config{Namespaced: namespaced, Namespace: "shared"})
+			module.client = client
+			project, code, err := module.createProject(context.Background(), "user", "creator", ProjectDto{Name: "Tenant One"})
+			assertNoError(t, err)
+			if code != http.StatusCreated || project.Name != "tenant-one" || project.Namespace != module.scope().ResourceNamespace(project.Name) {
+				t.Fatalf("unexpected project placement: code=%d project=%+v", code, project.ObjectMeta)
+			}
+			namespaceCreate, projectCreate := -1, -1
+			for index, action := range client.Actions() {
+				if action.GetVerb() == "create" && action.GetResource().Resource == "namespaces" {
+					namespaceCreate = index
+				}
+				if action.GetVerb() == "create" && action.GetResource().Resource == "projects" {
+					projectCreate = index
+				}
+			}
+			if namespaced && (namespaceCreate < 0 || namespaceCreate >= projectCreate) {
+				t.Fatal("namespace must be created before Project")
+			}
+			if !namespaced && namespaceCreate != -1 {
+				t.Fatal("shared mode must not provision tenant namespaces")
+			}
+			_, code, err = module.createProject(context.Background(), "user", "creator", ProjectDto{Name: "Tenant One"})
+			if code != http.StatusConflict || err == nil {
+				t.Fatalf("duplicate project must conflict: %d %v", code, err)
+			}
+		})
+	}
+}
+
+func TestProjectNamespaceFailures(t *testing.T) {
+	for _, mode := range []string{"unmanaged", "namespace-denied", "project-denied"} {
+		t.Run(mode, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			assertNoError(t, corev1.AddToScheme(scheme))
+			assertNoError(t, infrastructurev1alpha1.AddToScheme(scheme))
+			client := dynamicfake.NewSimpleDynamicClient(scheme)
+			module := New(Config{Namespaced: true})
+			module.client = client
+			namespaces := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
+			if mode == "unmanaged" {
+				_, err := client.Resource(namespaces).Create(context.Background(), &unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]interface{}{"name": "tenant"},
+				}}, metav1.CreateOptions{})
+				assertNoError(t, err)
+			} else {
+				resource := "namespaces"
+				if mode == "project-denied" {
+					resource = "projects"
+				}
+				client.PrependReactor("create", resource, func(action ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewForbidden(action.GetResource().GroupResource(), "tenant", errors.New("denied"))
+				})
+			}
+			_, code, err := module.createProject(context.Background(), "user", "creator", ProjectDto{Name: "tenant"})
+			if err == nil || (mode == "unmanaged" && code != http.StatusConflict) || (mode != "unmanaged" && code != http.StatusInternalServerError) {
+				t.Fatalf("expected provisioning failure: %d %v", code, err)
+			}
+			if mode == "project-denied" {
+				if _, err := client.Resource(namespaces).Get(context.Background(), "tenant", metav1.GetOptions{}); err != nil {
+					t.Fatal("failed Project creation must not delete the namespace")
+				}
+			}
+		})
+	}
 }
 
 func TestAdminRoleCannotBeModified(t *testing.T) {

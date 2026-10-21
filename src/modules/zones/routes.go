@@ -6,6 +6,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,9 +39,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	m.registerDNSEndpointRoutes(group)
 
 	group.GET("", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("read").Build(), func(c *gin.Context) {
-		objList, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: "project=" + c.Param("project-id"),
-		})
+		objList, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).List(c, metav1.ListOptions{})
 
 		if err != nil {
 			c.JSON(500, gin.H{"error": "failed to list zones: " + err.Error()})
@@ -76,14 +75,15 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      dto.Zone,
-				Namespace: m.cfg.Namespace,
+				Namespace: m.scope().ResourceNamespace(c.Param("project-id")),
 				Labels: map[string]string{
 					"project": c.Param("project-id"),
 				},
 			},
 			Spec: infrastructurev1alpha1.ZoneSpec{
-				Email: m.EmailToRname(dto.Email),
-				Zone:  dto.Zone,
+				Project: &corev1.LocalObjectReference{Name: c.Param("project-id")},
+				Email:   m.EmailToRname(dto.Email),
+				Zone:    dto.Zone,
 			},
 		}
 
@@ -103,7 +103,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 			return
 		}
 
-		createdObj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Create(c, &unstructured.Unstructured{Object: objMap}, metav1.CreateOptions{})
+		createdObj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Create(c, &unstructured.Unstructured{Object: objMap}, metav1.CreateOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {
 				return
@@ -124,7 +124,7 @@ func (m *Module) RegisterRoutes(r *gin.Engine) {
 	})
 
 	group.DELETE("/:zone-id", auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeZone).S("user_id").A("delete").Build(), func(c *gin.Context) {
-		err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Delete(c, c.Param("zone-id"), metav1.DeleteOptions{})
+		err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Delete(c, c.Param("zone-id"), metav1.DeleteOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {
 				return

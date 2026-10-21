@@ -20,6 +20,8 @@ type AppConfig struct {
 	Production           bool
 	Listen               string
 	Namespace            string
+	Namespaced           bool
+	FeatureGates         string
 	PrometheusEndpoint   string
 	CorsAllowOrigins     []string
 	CorsAllowedMethods   []string
@@ -75,12 +77,13 @@ func splitAndTrim(s1, s2 string) []string {
 }
 
 type ModuleDef struct {
-	Name string
-	Init func() app.Module
+	Name        string
+	FeatureGate string
+	Init        func() app.Module
 }
 
 func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
-	return []ModuleDef{
+	modules := []ModuleDef{
 		{
 			Name: "Utils",
 			Init: func() app.Module {
@@ -92,6 +95,7 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Init: func() app.Module {
 				return admin.New(admin.Config{
 					Namespace:           a.Namespace,
+					Namespaced:          a.Namespaced,
 					DefaultAdminProject: a.DefaultAdminProject,
 					DefaultAdminUser:    a.DefaultAdminUser,
 				})
@@ -102,6 +106,7 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Init: func() app.Module {
 				return projects.New(projects.Config{
 					Namespace:           a.Namespace,
+					Namespaced:          a.Namespaced,
 					DefaultAdminProject: a.DefaultAdminProject,
 					DefaultAdminUser:    a.DefaultAdminUser,
 				})
@@ -111,15 +116,18 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Name: "APIKeys",
 			Init: func() app.Module {
 				return apikeys.New(apikeys.Config{
-					Namespace: a.Namespace,
+					Namespace:  a.Namespace,
+					Namespaced: a.Namespaced,
 				})
 			},
 		},
 		{
-			Name: "Services",
+			Name:        "Services",
+			FeatureGate: "cachingreconciler",
 			Init: func() app.Module {
 				return services.New(services.Config{
 					Namespace:            a.Namespace,
+					Namespaced:           a.Namespaced,
 					ServiceBaseDomain:    a.ServiceBaseDomain,
 					DefaultRouteSelector: a.DefaultRouteSelector,
 				})
@@ -129,7 +137,8 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Name: "Locations",
 			Init: func() app.Module {
 				return locations.New(locations.Config{
-					Namespace: a.Namespace,
+					Namespace:  a.Namespace,
+					Namespaced: a.Namespaced,
 				})
 			},
 		},
@@ -137,9 +146,21 @@ func (a *AppConfig) GetAuthenticatedModules() []ModuleDef {
 			Name: "Zones",
 			Init: func() app.Module {
 				return zones.New(zones.Config{
-					Namespace: a.Namespace,
+					Namespace:  a.Namespace,
+					Namespaced: a.Namespaced,
 				})
 			},
 		},
 	}
+	enabledGates := make(map[string]bool)
+	for _, gate := range strings.Split(a.FeatureGates, ",") {
+		enabledGates[strings.TrimSpace(gate)] = true
+	}
+	enabledModules := make([]ModuleDef, 0, len(modules))
+	for _, module := range modules {
+		if module.FeatureGate == "" || enabledGates[module.FeatureGate] {
+			enabledModules = append(enabledModules, module)
+		}
+	}
+	return enabledModules
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/EdgeCDN-X/edgecdnx-api/src/internal/logger"
+	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/app"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -95,7 +96,7 @@ func (m *Module) authenticateAPIKey(token string) (apiKeyPrincipal, error) {
 	}
 
 	name := APIKeyObjectName(id)
-	key, err := getCached[infrastructurev1alpha1.APIKey](m.apiKeys, m.cfg.Namespace, name)
+	key, err := m.cachedAPIKey(name, token)
 	if err != nil {
 		return apiKeyPrincipal{}, err
 	}
@@ -117,15 +118,15 @@ func (m *Module) authenticateAPIKey(token string) (apiKeyPrincipal, error) {
 		return apiKeyPrincipal{}, rejectAPIKey(name, "expired")
 	}
 
-	if key.Spec.ProjectRef == nil || key.Spec.ProjectRef.Name == "" {
-		return apiKeyPrincipal{}, rejectAPIKey(name, "missing projectRef")
+	if key.Spec.Project == nil || key.Spec.Project.Name == "" {
+		return apiKeyPrincipal{}, rejectAPIKey(name, "missing project")
 	}
-	projectName := key.Spec.ProjectRef.Name
-	if key.Labels[APIKeyProjectLabel] != projectName {
-		return apiKeyPrincipal{}, rejectAPIKey(name, "project label does not match projectRef")
+	projectName := key.Spec.Project.Name
+	if key.Namespace != m.scope().ResourceNamespace(projectName) {
+		return apiKeyPrincipal{}, rejectAPIKey(name, "project namespace does not match placement")
 	}
 
-	project, err := getCached[infrastructurev1alpha1.Project](m.projects, m.cfg.Namespace, projectName)
+	project, err := getCached[infrastructurev1alpha1.Project](m.projects, m.scope().ResourceNamespace(projectName), projectName)
 	if err != nil {
 		return apiKeyPrincipal{}, err
 	}
@@ -138,6 +139,39 @@ func (m *Module) authenticateAPIKey(token string) (apiKeyPrincipal, error) {
 	}
 
 	return apiKeyPrincipal{Subject: APIKeySubject(id), Project: projectName}, nil
+}
+
+func (m *Module) cachedAPIKey(name, token string) (*infrastructurev1alpha1.APIKey, error) {
+	if !m.cfg.Namespaced {
+		return getCached[infrastructurev1alpha1.APIKey](m.apiKeys, m.cfg.Namespace, name)
+	}
+	indexer, ok := m.apiKeys.(cache.Indexer)
+	if !ok {
+		return nil, fmt.Errorf("API key name index is not initialized")
+	}
+	objects, err := indexer.ByIndex(app.ResourceNameIndex, name)
+	if err != nil {
+		return nil, fmt.Errorf("read API key index: %w", err)
+	}
+	var match *infrastructurev1alpha1.APIKey
+	for _, object := range objects {
+		resource, ok := object.(*unstructured.Unstructured)
+		if !ok {
+			return nil, fmt.Errorf("unexpected cached API key type %T", object)
+		}
+		key := &infrastructurev1alpha1.APIKey{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(resource.Object, key); err != nil {
+			return nil, err
+		}
+		if subtle.ConstantTimeCompare([]byte(APIKeyDigest(token)), []byte(key.Spec.Credential.Digest)) != 1 {
+			continue
+		}
+		if match != nil {
+			return nil, rejectAPIKey(name, "ambiguous API key across namespaces")
+		}
+		match = key
+	}
+	return match, nil
 }
 
 func ownedByProject(key *infrastructurev1alpha1.APIKey, project *infrastructurev1alpha1.Project) bool {

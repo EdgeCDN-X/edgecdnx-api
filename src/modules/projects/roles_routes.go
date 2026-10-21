@@ -168,7 +168,7 @@ func (m *Module) deleteRole(c *gin.Context) {
 }
 
 func (m *Module) loadProject(c *gin.Context) (*infrastructurev1alpha1.Project, bool) {
-	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, c.Param("project-id"), metav1.GetOptions{})
+	obj, err := m.client.Resource(gvr).Namespace(m.scope().ResourceNamespace(c.Param("project-id"))).Get(c, c.Param("project-id"), metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
@@ -192,7 +192,7 @@ func (m *Module) saveProject(c *gin.Context, project *infrastructurev1alpha1.Pro
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode project: " + err.Error()})
 		return false
 	}
-	_, err = m.client.Resource(gvr).Namespace(m.cfg.Namespace).Update(c, &unstructured.Unstructured{Object: object}, metav1.UpdateOptions{})
+	_, err = m.client.Resource(gvr).Namespace(m.scope().ResourceNamespace(project.Name)).Update(c, &unstructured.Unstructured{Object: object}, metav1.UpdateOptions{})
 	if err != nil {
 		if apierrors.IsConflict(err) {
 			c.JSON(http.StatusConflict, gin.H{"error": "project was modified concurrently; retry the request"})

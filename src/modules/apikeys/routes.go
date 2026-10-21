@@ -76,9 +76,7 @@ func (m *Module) listAPIKeys(c *gin.Context) {
 		return
 	}
 
-	objList, err := m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-		LabelSelector: projectLabel + "=" + projectID,
-	})
+	objList, err := m.scope().Resource(m.client, apiKeyGVR, projectID).List(c, metav1.ListOptions{})
 	if err != nil {
 		writeError(c, err, "failed to list API keys")
 		return
@@ -183,7 +181,7 @@ func (m *Module) createAPIKey(c *gin.Context) {
 	if err := m.setKeyRoles(c, projectID, subject, roles, true); err != nil {
 		// Roll back so that no unmanaged key remains without the requested RBAC.
 		rollbackCtx := context.WithoutCancel(c.Request.Context())
-		if delErr := m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).Delete(rollbackCtx, created.Name, metav1.DeleteOptions{}); delErr != nil && !apierrors.IsNotFound(delErr) {
+		if delErr := m.scope().Resource(m.client, apiKeyGVR, projectID).Delete(rollbackCtx, created.Name, metav1.DeleteOptions{}); delErr != nil && !apierrors.IsNotFound(delErr) {
 			logger.L().Error("Failed to roll back API key after RBAC update failure", zap.String("apikey", created.Name), zap.Error(delErr))
 		}
 		writeError(c, err, "failed to assign API key roles")
@@ -258,7 +256,7 @@ func (m *Module) updateAPIKey(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
-		updatedObj, err := m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).Update(c, obj, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, apiKeyGVR, c.Param("project-id")).Update(c, obj, metav1.UpdateOptions{})
 		if err != nil {
 			writeError(c, err, "failed to update API key")
 			return
@@ -296,7 +294,7 @@ func (m *Module) deleteAPIKey(c *gin.Context) {
 		return
 	}
 
-	err = m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).Delete(c, key.Name, metav1.DeleteOptions{})
+	err = m.scope().Resource(m.client, apiKeyGVR, projectID).Delete(c, key.Name, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		writeError(c, err, "failed to delete API key")
 		return
@@ -313,7 +311,7 @@ func (m *Module) createAPIKeyObject(ctx context.Context, project *infrastructure
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      auth.APIKeyObjectName(credential.ID),
-			Namespace: m.cfg.Namespace,
+			Namespace: m.scope().ResourceNamespace(project.Name),
 			Labels: map[string]string{
 				projectLabel: project.Name,
 			},
@@ -328,7 +326,7 @@ func (m *Module) createAPIKeyObject(ctx context.Context, project *infrastructure
 		},
 		Spec: infrastructurev1alpha1.APIKeySpec{
 			DisplayName: displayName,
-			ProjectRef:  &corev1.LocalObjectReference{Name: project.Name},
+			Project:     &corev1.LocalObjectReference{Name: project.Name},
 			Credential: infrastructurev1alpha1.CredentialSpec{
 				FormatVersion: auth.APIKeyFormatVersion,
 				Algorithm:     auth.APIKeyDigestAlgorithm,
@@ -343,7 +341,7 @@ func (m *Module) createAPIKeyObject(ctx context.Context, project *infrastructure
 		return nil, err
 	}
 
-	createdObj, err := m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).Create(ctx, obj, metav1.CreateOptions{})
+	createdObj, err := m.scope().Resource(m.client, apiKeyGVR, project.Name).Create(ctx, obj, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +392,7 @@ func (m *Module) setKeyRoles(c *gin.Context, projectID string, subject string, r
 		if err != nil {
 			return err
 		}
-		_, err = m.client.Resource(projectGVR).Namespace(m.cfg.Namespace).Update(c, obj, metav1.UpdateOptions{})
+		_, err = m.client.Resource(projectGVR).Namespace(m.scope().ResourceNamespace(projectID)).Update(c, obj, metav1.UpdateOptions{})
 		return err
 	})
 }
@@ -450,7 +448,7 @@ func (m *Module) callerAllowed(c *gin.Context, domain, resource, action string) 
 }
 
 func (m *Module) getProject(ctx context.Context, projectID string) (*infrastructurev1alpha1.Project, error) {
-	obj, err := m.client.Resource(projectGVR).Namespace(m.cfg.Namespace).Get(ctx, projectID, metav1.GetOptions{})
+	obj, err := m.client.Resource(projectGVR).Namespace(m.scope().ResourceNamespace(projectID)).Get(ctx, projectID, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, newRequestError(http.StatusNotFound, "project not found")
@@ -465,7 +463,7 @@ func (m *Module) getProjectAPIKey(ctx context.Context, projectID, name string) (
 		return nil, newRequestError(http.StatusNotFound, "API key not found")
 	}
 
-	obj, err := m.client.Resource(apiKeyGVR).Namespace(m.cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
+	obj, err := m.scope().Resource(m.client, apiKeyGVR, projectID).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, newRequestError(http.StatusNotFound, "API key not found")
@@ -484,9 +482,8 @@ func (m *Module) getProjectAPIKey(ctx context.Context, projectID, name string) (
 }
 
 func belongsToProject(key *infrastructurev1alpha1.APIKey, projectID string) bool {
-	return key.Labels[projectLabel] == projectID &&
-		key.Spec.ProjectRef != nil &&
-		key.Spec.ProjectRef.Name == projectID
+	return key.Spec.Project != nil &&
+		key.Spec.Project.Name == projectID
 }
 
 func isKeyGroup(rule infrastructurev1alpha1.RuleSpec, subject, projectID string) bool {
@@ -528,8 +525,8 @@ func toDto(key *infrastructurev1alpha1.APIKey, project *infrastructurev1alpha1.P
 	}
 
 	projectName := ""
-	if key.Spec.ProjectRef != nil {
-		projectName = key.Spec.ProjectRef.Name
+	if key.Spec.Project != nil {
+		projectName = key.Spec.Project.Name
 	}
 
 	var expiresAt *time.Time

@@ -10,6 +10,7 @@ import (
 	"github.com/EdgeCDN-X/edgecdnx-api/src/modules/auth"
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -76,9 +77,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			return
 		}
 
-		objList, err := m.client.Resource(dnsEndpointGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("project=%s,zone=%s", c.Param("project-id"), c.Param("zone-id")),
-		})
+		objList, err := m.scope().Resource(m.client, dnsEndpointGVR, c.Param("project-id")).List(c, metav1.ListOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {
 				return
@@ -93,6 +92,9 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, dnsEndpoint); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert DNS endpoint: " + err.Error()})
 				return
+			}
+			if dnsEndpoint.Spec.Zone == nil || dnsEndpoint.Spec.Zone.Name != c.Param("zone-id") {
+				continue
 			}
 			dnsEndpoints = append(dnsEndpoints, *dnsEndpoint)
 		}
@@ -147,13 +149,15 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      dnsEndpointResourceName(dto.DNSName, dto.RecordType),
-				Namespace: m.cfg.Namespace,
+				Namespace: m.scope().ResourceNamespace(c.Param("project-id")),
 				Labels: map[string]string{
 					"project": c.Param("project-id"),
 					"zone":    c.Param("zone-id"),
 				},
 			},
 			Spec: infrastructurev1alpha1.DNSEndpointSpec{
+				Project:       &corev1.LocalObjectReference{Name: c.Param("project-id")},
+				Zone:          &corev1.LocalObjectReference{Name: c.Param("zone-id")},
 				DNSName:       dto.DNSName,
 				RoutingPolicy: dto.RoutingPolicy,
 				RecordTTL:     dto.RecordTTL,
@@ -174,7 +178,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			return
 		}
 
-		createdObj, err := m.client.Resource(dnsEndpointGVR).Namespace(m.cfg.Namespace).Create(c, &unstructured.Unstructured{Object: objMap}, metav1.CreateOptions{})
+		createdObj, err := m.scope().Resource(m.client, dnsEndpointGVR, c.Param("project-id")).Create(c, &unstructured.Unstructured{Object: objMap}, metav1.CreateOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {
 				return
@@ -258,7 +262,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			return
 		}
 
-		updatedObj, err := m.client.Resource(dnsEndpointGVR).Namespace(m.cfg.Namespace).Update(c, &unstructured.Unstructured{Object: objMap}, metav1.UpdateOptions{})
+		updatedObj, err := m.scope().Resource(m.client, dnsEndpointGVR, c.Param("project-id")).Update(c, &unstructured.Unstructured{Object: objMap}, metav1.UpdateOptions{})
 		if err != nil {
 			if writeAPIStatusError(c, err) {
 				return
@@ -284,7 +288,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 			return
 		}
 
-		if err := m.client.Resource(dnsEndpointGVR).Namespace(m.cfg.Namespace).Delete(c, c.Param("dns-endpoint-id"), metav1.DeleteOptions{}); err != nil {
+		if err := m.scope().Resource(m.client, dnsEndpointGVR, c.Param("project-id")).Delete(c, c.Param("dns-endpoint-id"), metav1.DeleteOptions{}); err != nil {
 			if writeAPIStatusError(c, err) {
 				return
 			}
@@ -297,7 +301,7 @@ func (m *Module) registerDNSEndpointRoutes(group *gin.RouterGroup) {
 }
 
 func (m *Module) getProjectZone(c *gin.Context) (*infrastructurev1alpha1.Zone, bool) {
-	obj, err := m.client.Resource(gvr).Namespace(m.cfg.Namespace).Get(c, c.Param("zone-id"), metav1.GetOptions{})
+	obj, err := m.scope().Resource(m.client, gvr, c.Param("project-id")).Get(c, c.Param("zone-id"), metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
@@ -309,7 +313,7 @@ func (m *Module) getProjectZone(c *gin.Context) (*infrastructurev1alpha1.Zone, b
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve zone: " + err.Error()})
 		return nil, false
 	}
-	if obj.GetLabels()["project"] != c.Param("project-id") {
+	if !m.scope().Owns(obj, c.Param("project-id")) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
 		return nil, false
 	}
@@ -324,9 +328,7 @@ func (m *Module) getProjectZone(c *gin.Context) (*infrastructurev1alpha1.Zone, b
 
 // serviceHostAliasDNSEndpoints builds in-memory DNSEndpoints for project service host aliases that fall inside the zone.
 func (m *Module) serviceHostAliasDNSEndpoints(c *gin.Context, zone *infrastructurev1alpha1.Zone) ([]infrastructurev1alpha1.DNSEndpoint, bool) {
-	objList, err := m.client.Resource(serviceGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("project=%s", c.Param("project-id")),
-	})
+	objList, err := m.scope().Resource(m.client, serviceGVR, c.Param("project-id")).List(c, metav1.ListOptions{})
 	if err != nil {
 		if writeAPIStatusError(c, err) {
 			return nil, false
@@ -356,7 +358,7 @@ func (m *Module) serviceHostAliasDNSEndpoints(c *gin.Context, zone *infrastructu
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      dnsEndpointResourceName(hostAlias.Name, recordType),
-						Namespace: m.cfg.Namespace,
+						Namespace: m.scope().ResourceNamespace(c.Param("project-id")),
 						Labels: map[string]string{
 							"project": c.Param("project-id"),
 							"zone":    c.Param("zone-id"),
@@ -364,6 +366,8 @@ func (m *Module) serviceHostAliasDNSEndpoints(c *gin.Context, zone *infrastructu
 						},
 					},
 					Spec: infrastructurev1alpha1.DNSEndpointSpec{
+						Project:       service.Spec.Project.DeepCopy(),
+						Zone:          &corev1.LocalObjectReference{Name: zone.Name},
 						DNSName:       hostAlias.Name,
 						RoutingPolicy: "Geolocation",
 						RecordTTL:     serviceDNSEndpointRecordTTL,
@@ -381,7 +385,7 @@ func (m *Module) serviceHostAliasDNSEndpoints(c *gin.Context, zone *infrastructu
 }
 
 func (m *Module) getProjectZoneDNSEndpoint(c *gin.Context) (*unstructured.Unstructured, bool) {
-	obj, err := m.client.Resource(dnsEndpointGVR).Namespace(m.cfg.Namespace).Get(c, c.Param("dns-endpoint-id"), metav1.GetOptions{})
+	obj, err := m.scope().Resource(m.client, dnsEndpointGVR, c.Param("project-id")).Get(c, c.Param("dns-endpoint-id"), metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "DNS endpoint not found"})
@@ -394,8 +398,8 @@ func (m *Module) getProjectZoneDNSEndpoint(c *gin.Context) (*unstructured.Unstru
 		return nil, false
 	}
 
-	labels := obj.GetLabels()
-	if labels["project"] != c.Param("project-id") || labels["zone"] != c.Param("zone-id") {
+	zoneName, _, err := unstructured.NestedString(obj.Object, "spec", "zone", "name")
+	if err != nil || zoneName != c.Param("zone-id") {
 		c.JSON(http.StatusNotFound, gin.H{"error": "DNS endpoint not found"})
 		return nil, false
 	}

@@ -11,10 +11,10 @@ import (
 	infrastructurev1alpha1 "github.com/EdgeCDN-X/edgecdnx-controller/api/v1alpha1"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -32,9 +32,7 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 		return auth.NewAuthzBuilder().E(m.enforcer).T("project-id").R(auth.ResourceTypeHealthCheckProfile).S("user_id").A(action).Build()
 	}
 	group.GET("", authorize("read"), func(c *gin.Context) {
-		objects, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).List(c, metav1.ListOptions{
-			LabelSelector: labels.Set{locationProjectLabel: c.Param("project-id")}.String(),
-		})
+		objects, err := m.scope().Resource(m.client, healthCheckProfileGVR, c.Param("project-id")).List(c, metav1.ListOptions{})
 		if err != nil {
 			writeHealthCheckProfileError(c, "list", err)
 			return
@@ -76,15 +74,15 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 		}
 		profile := &infrastructurev1alpha1.HealthCheckProfile{
 			TypeMeta:   metav1.TypeMeta{APIVersion: infrastructurev1alpha1.SchemeGroupVersion.String(), Kind: "HealthCheckProfile"},
-			ObjectMeta: metav1.ObjectMeta{Name: dto.Name, Namespace: m.cfg.Namespace, Labels: profileLabels},
-			Spec:       infrastructurev1alpha1.HealthCheckProfileSpec{Probes: dto.Probes},
+			ObjectMeta: metav1.ObjectMeta{Name: dto.Name, Namespace: m.scope().ResourceNamespace(c.Param("project-id")), Labels: profileLabels},
+			Spec:       infrastructurev1alpha1.HealthCheckProfileSpec{Project: &corev1.LocalObjectReference{Name: c.Param("project-id")}, Probes: dto.Probes},
 		}
 		object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(profile)
 		if err != nil {
 			writeHealthCheckProfileError(c, "convert", err)
 			return
 		}
-		created, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).Create(c, &unstructured.Unstructured{Object: object}, metav1.CreateOptions{})
+		created, err := m.scope().Resource(m.client, healthCheckProfileGVR, c.Param("project-id")).Create(c, &unstructured.Unstructured{Object: object}, metav1.CreateOptions{})
 		if err != nil {
 			writeHealthCheckProfileError(c, "create", err)
 			return
@@ -106,7 +104,7 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			spec, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&infrastructurev1alpha1.HealthCheckProfileSpec{Probes: *dto.Probes})
+			spec, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&infrastructurev1alpha1.HealthCheckProfileSpec{Project: &corev1.LocalObjectReference{Name: c.Param("project-id")}, Probes: *dto.Probes})
 			if err != nil {
 				writeHealthCheckProfileError(c, "convert", err)
 				return
@@ -116,7 +114,7 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 		object.SetLabels(map[string]string{
 			locationProjectLabel: c.Param("project-id"),
 		})
-		updated, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).Update(c, object, metav1.UpdateOptions{})
+		updated, err := m.scope().Resource(m.client, healthCheckProfileGVR, c.Param("project-id")).Update(c, object, metav1.UpdateOptions{})
 		if err != nil {
 			writeHealthCheckProfileError(c, "update", err)
 			return
@@ -129,7 +127,7 @@ func (m *Module) registerHealthCheckProfileRoutes(r *gin.Engine) {
 			return
 		}
 		uid, version := object.GetUID(), object.GetResourceVersion()
-		err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).Delete(c, object.GetName(), metav1.DeleteOptions{
+		err := m.scope().Resource(m.client, healthCheckProfileGVR, c.Param("project-id")).Delete(c, object.GetName(), metav1.DeleteOptions{
 			Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &version},
 		})
 		if err != nil {
@@ -153,12 +151,12 @@ func bindHealthCheckProfileJSON(c *gin.Context, dto interface{}) error {
 }
 
 func (m *Module) getProjectHealthCheckProfile(c *gin.Context) (*unstructured.Unstructured, bool) {
-	object, err := m.client.Resource(healthCheckProfileGVR).Namespace(m.cfg.Namespace).Get(c, c.Param("profile-id"), metav1.GetOptions{})
+	object, err := m.scope().Resource(m.client, healthCheckProfileGVR, c.Param("project-id")).Get(c, c.Param("profile-id"), metav1.GetOptions{})
 	if err != nil {
 		writeHealthCheckProfileError(c, "get", err)
 		return nil, false
 	}
-	if object.GetLabels()[locationProjectLabel] != c.Param("project-id") {
+	if !m.scope().Owns(object, c.Param("project-id")) {
 		writeHealthCheckProfileError(c, "get", apierrors.NewNotFound(healthCheckProfileGVR.GroupResource(), c.Param("profile-id")))
 		return nil, false
 	}

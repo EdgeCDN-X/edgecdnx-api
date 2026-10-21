@@ -113,7 +113,7 @@ func (m *Module) getLocationHealthchecks(c *gin.Context) {
 	to := time.Now().UTC()
 	from := to.Add(-window)
 	// The healthchecker reports locations as "<namespace>/<name>".
-	locationKey := m.cfg.Namespace + "/" + location.Name
+	locationKey := location.Namespace + "/" + location.Name
 	records, err := m.healthchecks.RecentHealthchecks(c, locationKey, from)
 	if err != nil {
 		logger.L().Error("Failed to query healthchecks", zap.String("location", locationKey), zap.Error(err))
@@ -150,7 +150,7 @@ func (m *Module) activeLocationChecks(ctx context.Context, location infrastructu
 				if err != nil {
 					return nil, fmt.Errorf("get healthcheck profile %q: %w", ref.Name, err)
 				}
-				if object.GetLabels()[locationProjectLabel] != location.Labels[locationProjectLabel] {
+				if location.Spec.Project == nil || !m.scope().Owns(object, location.Spec.Project.Name) {
 					return nil, fmt.Errorf("healthcheck profile %q does not belong to the location's project", ref.Name)
 				}
 				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &profile); err != nil {
